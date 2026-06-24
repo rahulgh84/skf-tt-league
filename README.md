@@ -41,3 +41,7 @@ Upload all files to GitHub repo `skf-tt-league`, then enable GitHub Pages from b
 - Configurable points per game and win-by value.
 - Undo last point, start next game, reset score, and manual final score entry.
 - Live score saves to Firebase after every point.
+
+
+## Standings Update
+Standings now include Pts = Wins x 2, and sort by Pts, Diff, PF, then player name.
