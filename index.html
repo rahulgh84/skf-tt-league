@@ -4,17 +4,22 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SKF TT League Platform</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+  <link rel="apple-touch-icon" href="assets/icon-192.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0f3d66" />
   <link rel="stylesheet" href="assets/styles.css" />
 </head>
 <body>
   <header class="hero">
-    <div class="brand">SKF</div>
+    <img class="site-logo" src="assets/logo.png" alt="SKF Table Tennis Tournament Logo" />
     <div>
       <h1 id="appTitle">SKF TT League Platform</h1>
       <p>Seasons • Players • Groups • Stadiums • Schedule • Scores • Knockouts</p>
     </div>
     <div class="loginbar">
       <span id="roleBadge">Viewer Mode</span>
+      <span id="syncBadge" class="sync-badge">Checking sync...</span>
       <button id="loginBtn" class="btn light">Login</button>
       <button id="logoutBtn" class="btn light hide">Logout</button>
     </div>
@@ -41,7 +46,9 @@
         <div class="card"><h3>Players</h3><b id="dashPlayers">0</b></div>
         <div class="card"><h3>Groups</h3><b id="dashGroups">0</b></div>
         <div class="card"><h3>Matches</h3><b id="dashMatches">0</b></div>
-        <div class="card"><h3>Completed</h3><b id="dashDone">0</b></div>
+        <div class="card status-card scheduled"><h3>🟡 Scheduled</h3><b id="dashScheduled">0</b></div>
+        <div class="card status-card live"><h3>🔴 Live</h3><b id="dashLive">0</b></div>
+        <div class="card status-card completed"><h3>🟢 Completed</h3><b id="dashDone">0</b></div>
       </div>
       <div class="grid2">
         <div class="card"><h2>Top Standings</h2><div id="dashLeaderboard"></div></div>
@@ -112,7 +119,7 @@
     </section>
 
     <section id="settings" class="page manager-only">
-      <div class="card"><h2>Settings</h2><div class="formgrid"><input id="settingTitle" placeholder="League title"><select id="activeSeasonSelect"></select><input id="managerPasswordSetting" placeholder="Manager password"><input id="scorerPasswordSetting" placeholder="Scorer password"></div><button class="btn" onclick="saveSettings()">Save Settings</button><button class="btn" onclick="exportCSV()">Export Standings CSV</button><button class="btn" onclick="downloadBackup()">Download Backup JSON</button><button class="btn danger" onclick="resetAll()">Reset All Data</button><p class="muted">Passwords are stored in Firebase settings for convenience. This is basic protection for a community site, not enterprise authentication.</p></div>
+      <div class="card"><h2>Settings</h2><div class="formgrid"><input id="settingTitle" placeholder="League title"><select id="activeSeasonSelect"></select><input id="managerPasswordSetting" placeholder="Manager password"><input id="scorerPasswordSetting" placeholder="Scorer password"></div><button class="btn" onclick="saveSettings()">Save Settings</button><button class="btn" onclick="exportCSV()">Export Standings CSV</button><button class="btn" onclick="downloadBackup()">Download Backup JSON</button><button class="btn light" onclick="syncNow()">Sync Now</button><button class="btn danger" onclick="resetAll()">Reset All Data</button><p class="muted">Passwords are stored in Firebase settings for convenience. This is basic protection for a community site, not enterprise authentication.</p></div>
     </section>
   </main>
 
