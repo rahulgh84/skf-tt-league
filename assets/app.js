@@ -122,9 +122,166 @@ window.addManualMatch = async()=>{
 window.deleteMatch = async id=>{ if(!requireManager())return; if(confirm('Delete match?')){ state.matches=state.matches.filter(m=>m.id!==id); await save(); render(); } };
 window.changeStatus = async(id,status)=>{ if(!requireManager())return; const m=state.matches.find(x=>x.id===id); if(m){ m.status=status; await save(); render(); } };
 
-function parseScore(score){ let aw=0,bw=0,pfa=0,pfb=0; (score||'').split(',').forEach(g=>{ const [a,b]=g.trim().split('-').map(Number); if(!isNaN(a)&&!isNaN(b)){ pfa+=a; pfb+=b; if(a>b)aw++; else if(b>a)bw++; }}); return {aw,bw,pfa,pfb,winner:aw>bw?'A':bw>aw?'B':null}; }
-window.loadScoreForm = ()=>{ const m=activeMatches().find(x=>x.id===$('matchSelect').value); if(!m){ $('scoreForm').innerHTML=''; return; } $('scoreForm').innerHTML=`<p><b>${m.a}</b> vs <b>${m.b}</b></p><p class="muted">${m.type} • ${m.date||'No date'} ${m.time||''} • ${stadiumName(m.stadiumId)}</p><input id="scoreInput" placeholder="Example: 11-8, 9-11, 11-6" value="${m.score||''}"><button class="btn" onclick="saveScore('${m.id}')">Save Score</button>`; };
-window.saveScore = async id=>{ if(!requireScorer())return; const m=state.matches.find(x=>x.id===id); if(!m)return; m.score=$('scoreInput').value.trim(); const r=parseScore(m.score); m.winnerId = r.winner==='A'?m.aId:r.winner==='B'?m.bId:null; if(m.winnerId)m.status='Completed'; await save(); render(); loadScoreForm(); };
+function setsFromScore(score){
+  return (score||'').split(',').map(g=>g.trim()).filter(Boolean).map(g=>{
+    const [a,b]=g.split('-').map(Number);
+    return (!isNaN(a)&&!isNaN(b)) ? {a,b,done:true} : null;
+  }).filter(Boolean);
+}
+function scoreFromSets(sets){ return (sets||[]).filter(s=>s.done || s.a || s.b).map(s=>`${Number(s.a)||0}-${Number(s.b)||0}`).join(', '); }
+function setWinner(set, pointsToWin=11, winBy=2){
+  const a=Number(set?.a)||0, b=Number(set?.b)||0;
+  if(a>=pointsToWin && a-b>=winBy) return 'A';
+  if(b>=pointsToWin && b-a>=winBy) return 'B';
+  return null;
+}
+function parseScore(score){
+  let aw=0,bw=0,pfa=0,pfb=0;
+  setsFromScore(score).forEach(s=>{ pfa+=s.a; pfb+=s.b; if(s.a>s.b)aw++; else if(s.b>s.a)bw++; });
+  return {aw,bw,pfa,pfb,winner:aw>bw?'A':bw>aw?'B':null};
+}
+function normalizeLiveMatch(m){
+  if(!Array.isArray(m.sets)) m.sets = setsFromScore(m.score);
+  if(!m.sets.length) m.sets = [{a:0,b:0,done:false}];
+  m.bestOf = Number(m.bestOf || 3);
+  m.pointsToWin = Number(m.pointsToWin || 11);
+  m.winBy = Number(m.winBy || 2);
+  if(!Array.isArray(m.pointHistory)) m.pointHistory = [];
+  return m;
+}
+function matchResultFromSets(m){
+  normalizeLiveMatch(m);
+  let aw=0,bw=0,pfa=0,pfb=0;
+  m.sets.forEach(s=>{
+    pfa += Number(s.a)||0; pfb += Number(s.b)||0;
+    const w = setWinner(s, m.pointsToWin, m.winBy) || (s.done ? (s.a>s.b?'A':s.b>s.a?'B':null) : null);
+    if(w==='A') aw++; if(w==='B') bw++;
+  });
+  const need = Math.ceil((Number(m.bestOf)||3)/2);
+  const winner = aw>=need ? 'A' : bw>=need ? 'B' : null;
+  return {aw,bw,pfa,pfb,need,winner};
+}
+function refreshMatchFromLive(m){
+  normalizeLiveMatch(m);
+  m.sets.forEach(s=>{ if(setWinner(s, m.pointsToWin, m.winBy)) s.done = true; });
+  m.score = scoreFromSets(m.sets);
+  const r = matchResultFromSets(m);
+  m.winnerId = r.winner==='A' ? m.aId : r.winner==='B' ? m.bId : null;
+  if(m.winnerId) m.status = 'Completed';
+  else if(m.sets.some(s=>s.a||s.b)) m.status = 'In Progress';
+  return r;
+}
+function currentSetIndex(m){
+  normalizeLiveMatch(m);
+  let idx = m.sets.findIndex(s=>!s.done && !setWinner(s, m.pointsToWin, m.winBy));
+  if(idx < 0){
+    const r = matchResultFromSets(m);
+    if(!r.winner){ m.sets.push({a:0,b:0,done:false}); idx = m.sets.length-1; }
+    else idx = m.sets.length-1;
+  }
+  return idx;
+}
+function matchScoreText(m){
+  if(!m) return 'Pending';
+  const txt = m.score || scoreFromSets(m.sets);
+  return txt || 'Pending';
+}
+function liveSetsHtml(m){
+  normalizeLiveMatch(m);
+  const cur=currentSetIndex(m);
+  return `<div class="live-sets">${m.sets.map((s,i)=>{
+    const w=setWinner(s,m.pointsToWin,m.winBy) || (s.done ? (s.a>s.b?'A':s.b>s.a?'B':'') : '');
+    return `<div class="set-pill ${i===cur?'current':''}"><b>Game ${i+1}</b><span>${s.a||0}-${s.b||0}</span><small>${w==='A'?m.a:w==='B'?m.b:s.done?'Done':'Live'}</small></div>`;
+  }).join('')}</div>`;
+}
+window.loadScoreForm = ()=>{
+  const m=activeMatches().find(x=>x.id===$('matchSelect').value);
+  if(!m){ $('scoreForm').innerHTML=''; return; }
+  normalizeLiveMatch(m);
+  const r=matchResultFromSets(m), idx=currentSetIndex(m), cur=m.sets[idx] || {a:0,b:0};
+  $('scoreForm').innerHTML=`
+    <div class="live-score-card">
+      <h3>${m.a} vs ${m.b}</h3>
+      <p class="muted">${m.type} • ${m.date||'No date'} ${m.time||''} • ${stadiumName(m.stadiumId)} • ${m.status||'Scheduled'}</p>
+      <div class="formrow live-settings">
+        <label>Match format <select id="bestOfInput" onchange="updateLiveSettings('${m.id}')">${[1,3,5,7].map(n=>`<option value="${n}" ${Number(m.bestOf)===n?'selected':''}>Best of ${n}</option>`).join('')}</select></label>
+        <label>Game to <input id="pointsToWinInput" type="number" min="1" value="${m.pointsToWin}"></label>
+        <label>Win by <input id="winByInput" type="number" min="1" value="${m.winBy}"></label>
+        <button class="btn light" onclick="updateLiveSettings('${m.id}')">Apply</button>
+      </div>
+      ${liveSetsHtml(m)}
+      <div class="live-board">
+        <div class="player-score"><b>${m.a}</b><span>${cur.a||0}</span><button class="btn" onclick="addPoint('${m.id}','A')">+1 ${m.a}</button></div>
+        <div class="player-score"><b>${m.b}</b><span>${cur.b||0}</span><button class="btn" onclick="addPoint('${m.id}','B')">+1 ${m.b}</button></div>
+      </div>
+      <p class="muted">Sets: ${m.a} ${r.aw} - ${r.bw} ${m.b} ${r.winner ? '• Winner: '+(r.winner==='A'?m.a:m.b) : ''}</p>
+      <div class="formrow">
+        <button class="btn light" onclick="undoPoint('${m.id}')">Undo Last Point</button>
+        <button class="btn light" onclick="nextGame('${m.id}')">Start Next Game</button>
+        <button class="btn danger" onclick="resetLiveScore('${m.id}')">Reset Score</button>
+      </div>
+      <hr>
+      <p class="muted">Optional final/manual score entry:</p>
+      <input id="scoreInput" placeholder="Example: 11-8, 9-11, 11-6" value="${matchScoreText(m)==='Pending'?'':matchScoreText(m)}">
+      <button class="btn" onclick="saveScore('${m.id}')">Save Manual Score</button>
+    </div>`;
+};
+window.updateLiveSettings = async id=>{
+  if(!requireScorer())return;
+  const m=state.matches.find(x=>x.id===id); if(!m)return;
+  normalizeLiveMatch(m);
+  m.bestOf=Number($('bestOfInput')?.value || m.bestOf || 3);
+  m.pointsToWin=Number($('pointsToWinInput')?.value || m.pointsToWin || 11);
+  m.winBy=Number($('winByInput')?.value || m.winBy || 2);
+  refreshMatchFromLive(m); await save(); render(); loadScoreForm();
+};
+window.addPoint = async(id, side)=>{
+  if(!requireScorer())return;
+  const m=state.matches.find(x=>x.id===id); if(!m)return;
+  normalizeLiveMatch(m);
+  if(matchResultFromSets(m).winner){ alert('Match already completed. Reset score to score again.'); return; }
+  m.pointHistory.push(JSON.stringify(m.sets));
+  const idx=currentSetIndex(m); const s=m.sets[idx];
+  if(side==='A') s.a=(Number(s.a)||0)+1; else s.b=(Number(s.b)||0)+1;
+  if(setWinner(s,m.pointsToWin,m.winBy)) s.done=true;
+  refreshMatchFromLive(m);
+  if(!m.winnerId && s.done) m.sets.push({a:0,b:0,done:false});
+  await save(); render(); loadScoreForm();
+};
+window.undoPoint = async id=>{
+  if(!requireScorer())return;
+  const m=state.matches.find(x=>x.id===id); if(!m)return; normalizeLiveMatch(m);
+  const prev=m.pointHistory.pop(); if(!prev)return alert('No point history to undo.');
+  m.sets=JSON.parse(prev); m.status='In Progress'; refreshMatchFromLive(m); if(!m.winnerId && m.status==='Completed') m.status='In Progress';
+  await save(); render(); loadScoreForm();
+};
+window.nextGame = async id=>{
+  if(!requireScorer())return;
+  const m=state.matches.find(x=>x.id===id); if(!m)return; normalizeLiveMatch(m);
+  if(matchResultFromSets(m).winner) return alert('Match already completed.');
+  const idx=currentSetIndex(m); const s=m.sets[idx];
+  if(!s.done && (s.a || s.b) && !confirm('Current game is not finished. Start next game anyway?')) return;
+  if(!s.done && (s.a || s.b)) s.done=true;
+  m.sets.push({a:0,b:0,done:false}); refreshMatchFromLive(m); await save(); render(); loadScoreForm();
+};
+window.resetLiveScore = async id=>{
+  if(!requireScorer())return;
+  if(!confirm('Reset score for this match?'))return;
+  const m=state.matches.find(x=>x.id===id); if(!m)return;
+  m.sets=[{a:0,b:0,done:false}]; m.pointHistory=[]; m.score=''; m.winnerId=null; m.status='Scheduled';
+  await save(); render(); loadScoreForm();
+};
+window.saveScore = async id=>{
+  if(!requireScorer())return;
+  const m=state.matches.find(x=>x.id===id); if(!m)return;
+  m.score=$('scoreInput').value.trim();
+  m.sets=setsFromScore(m.score);
+  if(!m.sets.length) m.sets=[{a:0,b:0,done:false}];
+  m.pointHistory=[];
+  const r=refreshMatchFromLive(m);
+  if(!r.winner && m.score) m.status='In Progress';
+  await save(); render(); loadScoreForm();
+};
 
 function standingsForGroup(groupId){
   const rows=activePlayers().filter(p=>p.groupId===groupId).map(p=>({id:p.id,name:p.name,p:0,w:0,l:0,pf:0,pa:0}));
@@ -171,12 +328,12 @@ function render(){
   $('manualGroup').innerHTML='<option value="">No group</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
   $('manualStadium').innerHTML='<option value="">No stadium</option>'+state.stadiums.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
   const scheduleRows=activeMatches().filter(m=>!m.isKnockout);
-  $('scheduleList').innerHTML=table(scheduleRows,[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Type','type'],['Group',r=>groupName(r.groupId)],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)],['Score',r=>r.score||'Pending'],['Status',r=>isManager?`<select onchange="changeStatus('${r.id}',this.value)">${['Scheduled','In Progress','Completed','Walkover','Postponed','Cancelled'].map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}</select>`:`<span class="status-${r.status}">${r.status}</span>`],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
+  $('scheduleList').innerHTML=table(scheduleRows,[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Type','type'],['Group',r=>groupName(r.groupId)],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)],['Score',r=>matchScoreText(r)],['Status',r=>isManager?`<select onchange="changeStatus('${r.id}',this.value)">${['Scheduled','In Progress','Completed','Walkover','Postponed','Cancelled'].map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}</select>`:`<span class="status-${r.status}">${r.status}</span>`],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
   $('matchSelect').innerHTML=activeMatches().map(m=>`<option value="${m.id}">${m.type}: ${m.a} vs ${m.b}</option>`).join(''); if(activeMatches().length) loadScoreForm(); else $('scoreForm').innerHTML='';
   $('dashUpcoming').innerHTML=table(activeMatches().filter(m=>!m.score && m.status!=='Cancelled').slice(0,10),[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)]]);
   $('dashLeaderboard').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows.slice(0,4),[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['W','w'],['L','l'],['Diff',r=>r.pf-r.pa]])).join('');
   $('groupStandings').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows,[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['P','p'],['W','w'],['L','l'],['PF','pf'],['PA','pa'],['Diff',r=>r.pf-r.pa]])).join('');
-  $('knockoutList').innerHTML=table(activeMatches().filter(m=>m.isKnockout),[['Round','round'],['Match',r=>`${r.a} vs ${r.b}`],['Score',r=>r.score||'Pending'],['Winner',r=>r.winnerId?(r.winnerId===r.aId?r.a:r.b):'-'],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
+  $('knockoutList').innerHTML=table(activeMatches().filter(m=>m.isKnockout),[['Round','round'],['Match',r=>`${r.a} vs ${r.b}`],['Score',r=>matchScoreText(r)],['Winner',r=>r.winnerId?(r.winnerId===r.aId?r.a:r.b):'-'],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
   $('hallList').innerHTML=table(state.hallOfFame,[['Season','season'],['Champion','champion'],['Runner-up','runner'],['Action',r=>isManager?`<button class="btn danger" onclick="deleteHallEntry('${r.id}')">Delete</button>`:'']]);
   $('activeSeasonSelect').innerHTML=state.seasons.map(s=>`<option value="${s.id}" ${s.id===activeSeasonId()?'selected':''}>${s.name}</option>`).join('');
   $('settingTitle').value=state.settings.title; $('managerPasswordSetting').value=state.settings.managerPassword; $('scorerPasswordSetting').value=state.settings.scorerPassword;
