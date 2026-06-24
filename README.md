@@ -45,3 +45,21 @@ Upload all files to GitHub repo `skf-tt-league`, then enable GitHub Pages from b
 
 ## Standings Update
 Standings now include Pts = Wins x 2, and sort by Pts, Diff, PF, then player name.
+
+# SKF TT League Platform v3.2 Tournament Bundle
+
+Includes:
+- SKF tournament logo in header
+- PWA/offline app support
+- Live point-by-point scoring
+- Standings: Rank, Player, P, W, L, Pts, PF, PA, Diff
+- Match status colors:
+  - Scheduled = Yellow
+  - Live = Red
+  - Completed = Green
+- Dashboard counters for Scheduled, Live, Completed
+- Stadiums, Schedule, Groups, Knockouts, Hall of Fame, Settings
+
+Upload/replace all files in the GitHub repository `skf-tt-league`.
+
+Keep your Firebase project as-is. The included `assets/firebase-config.js` may be replaced with your existing Firebase config if needed.
