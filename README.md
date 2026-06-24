@@ -33,3 +33,11 @@ service cloud.firestore {
 
 ## Deploy
 Upload all files to GitHub repo `skf-tt-league`, then enable GitHub Pages from branch `main`, folder `/root`.
+
+
+## v3.1 Live Scoring Update
+- Scorers and managers can update score point-by-point during a match.
+- Supports Best of 1, 3, 5, or 7.
+- Configurable points per game and win-by value.
+- Undo last point, start next game, reset score, and manual final score entry.
+- Live score saves to Firebase after every point.
