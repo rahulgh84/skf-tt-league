@@ -19,6 +19,9 @@ const defaultState = {
 };
 let state = structuredClone(defaultState);
 let docRef = null;
+let isOnlineMode = navigator.onLine;
+let lastSyncStatus = 'Not synced';
+let pendingLocalChanges = localStorage.getItem('skf_tt_league_pending_sync') === 'yes';
 let role = localStorage.getItem('skf_tt_league_role') || 'viewer';
 let isManager = false;
 let isScorer = false;
@@ -46,6 +49,8 @@ async function initData(){
       if(!snap.exists()) await setDoc(docRef, defaultState);
       onSnapshot(docRef, s=>{
         state = mergeState(s.exists()?s.data():{});
+        saveLocalSnapshot();
+        if(!pendingLocalChanges) lastSyncStatus = 'Live synced';
         render();
       }, err=>{ console.error(err); alert('Firebase connection error. Check Firestore rules.'); loadLocal(); });
     }catch(e){ console.error(e); loadLocal(); }
@@ -57,8 +62,59 @@ function mergeState(data){
   for(const k of ['seasons','players','groups','stadiums','matches','hallOfFame']) merged[k] ||= [];
   return merged;
 }
-function loadLocal(){ state = mergeState(JSON.parse(localStorage.getItem(fallbackKey)||'{}')); render(); }
-async function save(){ if(docRef) await setDoc(docRef, state); else localStorage.setItem(fallbackKey, JSON.stringify(state)); }
+function loadLocal(){ state = mergeState(JSON.parse(localStorage.getItem(fallbackKey)||'{}')); lastSyncStatus = hasFirebaseConfig() ? 'Offline/local mode' : 'Local mode'; render(); }
+function saveLocalSnapshot(){ localStorage.setItem(fallbackKey, JSON.stringify(state)); }
+function markPending(){ pendingLocalChanges = true; localStorage.setItem('skf_tt_league_pending_sync','yes'); }
+function clearPending(){ pendingLocalChanges = false; localStorage.removeItem('skf_tt_league_pending_sync'); }
+async function save(){
+  saveLocalSnapshot();
+  if(docRef && navigator.onLine){
+    try{
+      await setDoc(docRef, state);
+      clearPending();
+      lastSyncStatus = 'Synced';
+      updateSyncBadge();
+    }catch(e){
+      console.error(e);
+      markPending();
+      lastSyncStatus = 'Offline - saved on this device';
+      updateSyncBadge();
+    }
+  } else {
+    markPending();
+    lastSyncStatus = 'Offline - saved on this device';
+    updateSyncBadge();
+  }
+}
+async function syncNow(){
+  if(!docRef) return alert('Firebase is not connected yet.');
+  if(!navigator.onLine) return alert('No internet connection. Scores are saved on this device.');
+  try{
+    saveLocalSnapshot();
+    await setDoc(docRef, state);
+    clearPending();
+    lastSyncStatus = 'Synced';
+    updateSyncBadge();
+    alert('Synced to Firebase.');
+  }catch(e){
+    console.error(e);
+    markPending();
+    lastSyncStatus = 'Sync failed - saved locally';
+    updateSyncBadge();
+    alert('Sync failed. Data is still saved on this device.');
+  }
+}
+window.syncNow = syncNow;
+function updateSyncBadge(){
+  const el = document.getElementById('syncBadge');
+  if(!el) return;
+  const online = navigator.onLine;
+  const text = !hasFirebaseConfig() ? 'Local Only' : !online ? 'Offline - saved locally' : pendingLocalChanges ? 'Online - sync pending' : lastSyncStatus || 'Online';
+  el.textContent = text;
+  el.className = 'sync-badge ' + (!online ? 'offline' : pendingLocalChanges ? 'pending' : 'online');
+}
+window.addEventListener('online', () => { isOnlineMode = true; updateSyncBadge(); if(pendingLocalChanges) syncNow(); });
+window.addEventListener('offline', () => { isOnlineMode = false; lastSyncStatus = 'Offline - saved locally'; updateSyncBadge(); });
 function canScore(){ return isManager || isScorer; }
 function requireManager(){ if(!isManager){ alert('Manager login required'); return false; } return true; }
 function requireScorer(){ if(!canScore()){ alert('Manager or scorer login required'); return false; } return true; }
@@ -168,7 +224,7 @@ function refreshMatchFromLive(m){
   const r = matchResultFromSets(m);
   m.winnerId = r.winner==='A' ? m.aId : r.winner==='B' ? m.bId : null;
   if(m.winnerId) m.status = 'Completed';
-  else if(m.sets.some(s=>s.a||s.b)) m.status = 'In Progress';
+  else if(m.sets.some(s=>s.a||s.b)) m.status = 'Live';
   return r;
 }
 function currentSetIndex(m){
@@ -186,6 +242,16 @@ function matchScoreText(m){
   const txt = m.score || scoreFromSets(m.sets);
   return txt || 'Pending';
 }
+function matchStatus(m){
+  const s = m?.status || 'Scheduled';
+  return s === 'In Progress' ? 'Live' : s;
+}
+function statusClass(m){ return 'status-' + matchStatus(m).replace(/\s+/g,'-'); }
+function statusBadge(m){
+  const s = matchStatus(m);
+  const icon = s === 'Scheduled' ? '🟡' : s === 'Live' ? '🔴' : s === 'Completed' ? '🟢' : '';
+  return `<span class="match-status ${statusClass(m)}">${icon} ${s}</span>`;
+}
 function liveSetsHtml(m){
   normalizeLiveMatch(m);
   const cur=currentSetIndex(m);
@@ -202,7 +268,7 @@ window.loadScoreForm = ()=>{
   $('scoreForm').innerHTML=`
     <div class="live-score-card">
       <h3>${m.a} vs ${m.b}</h3>
-      <p class="muted">${m.type} • ${m.date||'No date'} ${m.time||''} • ${stadiumName(m.stadiumId)} • ${m.status||'Scheduled'}</p>
+      <p class="muted">${m.type} • ${m.date||'No date'} ${m.time||''} • ${stadiumName(m.stadiumId)} • ${statusBadge(m)}</p>
       <div class="formrow live-settings">
         <label>Match format <select id="bestOfInput" onchange="updateLiveSettings('${m.id}')">${[1,3,5,7].map(n=>`<option value="${n}" ${Number(m.bestOf)===n?'selected':''}>Best of ${n}</option>`).join('')}</select></label>
         <label>Game to <input id="pointsToWinInput" type="number" min="1" value="${m.pointsToWin}"></label>
@@ -252,7 +318,7 @@ window.undoPoint = async id=>{
   if(!requireScorer())return;
   const m=state.matches.find(x=>x.id===id); if(!m)return; normalizeLiveMatch(m);
   const prev=m.pointHistory.pop(); if(!prev)return alert('No point history to undo.');
-  m.sets=JSON.parse(prev); m.status='In Progress'; refreshMatchFromLive(m); if(!m.winnerId && m.status==='Completed') m.status='In Progress';
+  m.sets=JSON.parse(prev); m.status='Live'; refreshMatchFromLive(m); if(!m.winnerId && m.status==='Completed') m.status='Live';
   await save(); render(); loadScoreForm();
 };
 window.nextGame = async id=>{
@@ -279,7 +345,7 @@ window.saveScore = async id=>{
   if(!m.sets.length) m.sets=[{a:0,b:0,done:false}];
   m.pointHistory=[];
   const r=refreshMatchFromLive(m);
-  if(!r.winner && m.score) m.status='In Progress';
+  if(!r.winner && m.score) m.status='Live';
   await save(); render(); loadScoreForm();
 };
 
@@ -317,8 +383,13 @@ window.saveSettings = async()=>{ if(!requireManager())return; state.settings.tit
 
 function render(){
   setRole();
+  updateSyncBadge();
   $('appTitle').textContent=state.settings.title;
-  $('dashSeason').textContent=seasonName(activeSeasonId()); $('dashPlayers').textContent=activePlayers().length; $('dashGroups').textContent=activeGroups().length; $('dashMatches').textContent=activeMatches().length; $('dashDone').textContent=activeMatches().filter(m=>m.status==='Completed'||m.score).length;
+  const matches = activeMatches();
+  const scheduledCount = matches.filter(m=>matchStatus(m)==='Scheduled').length;
+  const liveCount = matches.filter(m=>matchStatus(m)==='Live').length;
+  const completedCount = matches.filter(m=>matchStatus(m)==='Completed').length;
+  $('dashSeason').textContent=seasonName(activeSeasonId()); $('dashPlayers').textContent=activePlayers().length; $('dashGroups').textContent=activeGroups().length; $('dashMatches').textContent=matches.length; $('dashScheduled').textContent=scheduledCount; $('dashLive').textContent=liveCount; $('dashDone').textContent=completedCount;
   $('seasonsList').innerHTML=table(state.seasons,[['Season','name'],['Status','status'],['Action',r=>isManager?`<button class="btn" onclick="setActiveSeason('${r.id}')">Make Active</button><button class="btn light" onclick="archiveSeason('${r.id}')">Archive/Activate</button><button class="btn danger" onclick="deleteSeason('${r.id}')">Delete</button>`:'']]);
   const groupOptions=['<option value="">Unassigned</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('')];
   $('playersList').innerHTML=table(activePlayers(),[['Player',r=>`${r.name}${r.nick?`<br><span class="muted">${r.nick}</span>`:''}`],['Group',r=>isManager?`<select onchange="changePlayerGroup('${r.id}',this.value)"><option value="">Unassigned</option>${activeGroups().map(g=>`<option value="${g.id}" ${g.id===r.groupId?'selected':''}>${g.name}</option>`).join('')}</select>`:groupName(r.groupId)],['Action',r=>isManager?`<button class="btn danger" onclick="deletePlayer('${r.id}')">Delete</button>`:'']]);
@@ -328,9 +399,9 @@ function render(){
   $('manualGroup').innerHTML='<option value="">No group</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
   $('manualStadium').innerHTML='<option value="">No stadium</option>'+state.stadiums.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
   const scheduleRows=activeMatches().filter(m=>!m.isKnockout);
-  $('scheduleList').innerHTML=table(scheduleRows,[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Type','type'],['Group',r=>groupName(r.groupId)],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)],['Score',r=>matchScoreText(r)],['Status',r=>isManager?`<select onchange="changeStatus('${r.id}',this.value)">${['Scheduled','In Progress','Completed','Walkover','Postponed','Cancelled'].map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}</select>`:`<span class="status-${r.status}">${r.status}</span>`],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
-  $('matchSelect').innerHTML=activeMatches().map(m=>`<option value="${m.id}">${m.type}: ${m.a} vs ${m.b}</option>`).join(''); if(activeMatches().length) loadScoreForm(); else $('scoreForm').innerHTML='';
-  $('dashUpcoming').innerHTML=table(activeMatches().filter(m=>!m.score && m.status!=='Cancelled').slice(0,10),[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)]]);
+  $('scheduleList').innerHTML=table(scheduleRows,[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Type','type'],['Group',r=>groupName(r.groupId)],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)],['Score',r=>matchScoreText(r)],['Status',r=>isManager?`<select class="status-select ${statusClass(r)}" onchange="changeStatus('${r.id}',this.value)">${['Scheduled','Live','Completed','Walkover','Postponed','Cancelled'].map(s=>`<option ${matchStatus(r)===s?'selected':''}>${s}</option>`).join('')}</select>`:statusBadge(r)],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
+  $('matchSelect').innerHTML=activeMatches().map(m=>`<option value="${m.id}">${matchStatus(m)} • ${m.type}: ${m.a} vs ${m.b}</option>`).join(''); if(activeMatches().length) loadScoreForm(); else $('scoreForm').innerHTML='';
+  $('dashUpcoming').innerHTML=table(activeMatches().filter(m=>matchStatus(m)==='Scheduled' || matchStatus(m)==='Live').slice(0,10),[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)]]);
   $('dashLeaderboard').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows.slice(0,4),[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['W','w'],['L','l'],['Pts','pts'],['Diff',r=>r.pf-r.pa]])).join('');
   $('groupStandings').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows,[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['P','p'],['W','w'],['L','l'],['Pts','pts'],['PF','pf'],['PA','pa'],['Diff',r=>r.pf-r.pa]])).join('');
   $('knockoutList').innerHTML=table(activeMatches().filter(m=>m.isKnockout),[['Round','round'],['Match',r=>`${r.a} vs ${r.b}`],['Score',r=>matchScoreText(r)],['Winner',r=>r.winnerId?(r.winnerId===r.aId?r.a:r.b):'-'],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
@@ -343,4 +414,5 @@ window.downloadBackup=()=>download('skf-tt-league-backup.json',JSON.stringify(st
 function download(name,text){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'})); a.download=name; a.click(); }
 window.resetAll=async()=>{ if(!requireManager())return; if(confirm('Reset all league data?')){ state=structuredClone(defaultState); await save(); render(); } };
 
+if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.error)); }
 initData(); showPage();
