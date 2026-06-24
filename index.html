@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SKF TT League Platform</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">SKF</div>
+    <div>
+      <h1 id="appTitle">SKF TT League Platform</h1>
+      <p>Seasons • Players • Groups • Stadiums • Schedule • Scores • Knockouts</p>
+    </div>
+    <div class="loginbar">
+      <span id="roleBadge">Viewer Mode</span>
+      <button id="loginBtn" class="btn light">Login</button>
+      <button id="logoutBtn" class="btn light hide">Logout</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <a href="#dashboard">Dashboard</a>
+    <a href="#seasons">Seasons</a>
+    <a href="#players">Players</a>
+    <a href="#groups">Groups</a>
+    <a href="#stadiums">Stadiums</a>
+    <a href="#schedule">Schedule</a>
+    <a href="#scores">Scores</a>
+    <a href="#standings">Standings</a>
+    <a href="#knockouts">Knockouts</a>
+    <a href="#hall">Hall of Fame</a>
+    <a href="#settings" class="manager-only">Settings</a>
+  </nav>
+
+  <main>
+    <section id="dashboard" class="page active">
+      <div class="cards">
+        <div class="card"><h3>Active Season</h3><b id="dashSeason">-</b></div>
+        <div class="card"><h3>Players</h3><b id="dashPlayers">0</b></div>
+        <div class="card"><h3>Groups</h3><b id="dashGroups">0</b></div>
+        <div class="card"><h3>Matches</h3><b id="dashMatches">0</b></div>
+        <div class="card"><h3>Completed</h3><b id="dashDone">0</b></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h2>Top Standings</h2><div id="dashLeaderboard"></div></div>
+        <div class="card"><h2>Upcoming Schedule</h2><div id="dashUpcoming"></div></div>
+      </div>
+    </section>
+
+    <section id="seasons" class="page">
+      <div class="card manager-only"><h2>Create Season</h2><div class="formrow"><input id="seasonName" placeholder="Season 2026"><button class="btn" onclick="addSeason()">Add Season</button></div></div>
+      <div class="card"><h2>Seasons</h2><div id="seasonsList"></div></div>
+    </section>
+
+    <section id="players" class="page">
+      <div class="card manager-only"><h2>Add Player</h2><div class="formrow"><input id="playerName" placeholder="Player name"><input id="playerNick" placeholder="Nickname / title optional"><button class="btn" onclick="addPlayer()">Add Player</button></div></div>
+      <div class="card"><h2>Players</h2><div id="playersList"></div></div>
+    </section>
+
+    <section id="groups" class="page">
+      <div class="card manager-only"><h2>Create Group</h2><div class="formrow"><input id="groupName" placeholder="Group A"><button class="btn" onclick="addGroup()">Add Group</button></div></div>
+      <div class="card"><h2>Groups & Assignments</h2><div id="groupsList"></div></div>
+    </section>
+
+    <section id="stadiums" class="page">
+      <div class="card manager-only"><h2>Create Stadium</h2><div class="formrow"><input id="stadiumName" placeholder="Rahul Champions Court"><input id="stadiumHost" placeholder="Host / location optional"><button class="btn" onclick="addStadium()">Add Stadium</button></div></div>
+      <div class="card"><h2>Stadiums</h2><div id="stadiumsList"></div></div>
+    </section>
+
+    <section id="schedule" class="page">
+      <div class="card manager-only"><h2>Generate Group Round Robin</h2><p class="muted">Creates matches only within each group.</p><button class="btn" onclick="generateGroupMatches()">Generate Group Matches</button><button class="btn danger" onclick="clearGroupMatches()">Clear Group Matches</button></div>
+      <div class="card manager-only"><h2>Create / Schedule Match Manually</h2>
+        <div class="formgrid">
+          <select id="manualType"><option>Group Match</option><option>Quarter Final</option><option>Semi Final</option><option>Final</option><option>Third Place</option><option>Friendly</option></select>
+          <select id="manualA"></select>
+          <select id="manualB"></select>
+          <select id="manualGroup"></select>
+          <select id="manualStadium"></select>
+          <input id="manualDate" type="date">
+          <input id="manualTime" type="time">
+          <input id="manualRound" placeholder="Round label, e.g. Week 1">
+        </div>
+        <button class="btn" onclick="addManualMatch()">Add Manual Match</button>
+      </div>
+      <div class="card"><h2>Schedule</h2><div id="scheduleList"></div></div>
+    </section>
+
+    <section id="scores" class="page">
+      <div class="card can-score-only"><h2>Enter / Update Score</h2><select id="matchSelect" onchange="loadScoreForm()"></select><div id="scoreForm"></div></div>
+      <div class="card viewer-note"><h2>Scores</h2><p>Only manager or scorer can enter results. Viewers can see completed scores in Schedule and Standings.</p></div>
+    </section>
+
+    <section id="standings" class="page">
+      <div class="card"><h2>Group Standings</h2><div id="groupStandings"></div></div>
+    </section>
+
+    <section id="knockouts" class="page">
+      <div class="card manager-only"><h2>Auto Generate Knockouts</h2><div class="formrow"><input id="qualifiersPerGroup" type="number" min="1" value="2" placeholder="Qualifiers per group"><button class="btn" onclick="generateKnockouts()">Generate</button><button class="btn danger" onclick="clearKnockouts()">Clear Knockouts</button></div></div>
+      <div class="card manager-only"><h2>Add Knockout Match Manually</h2><div class="formrow"><select id="koRound"><option>Quarter Final</option><option>Semi Final</option><option>Final</option><option>Third Place</option><option>Knockout</option></select><select id="koA"></select><select id="koB"></select><button class="btn" onclick="addManualKnockout()">Add Knockout</button></div></div>
+      <div class="card"><h2>Knockout Bracket</h2><div id="knockoutList"></div></div>
+    </section>
+
+    <section id="hall" class="page">
+      <div class="card manager-only"><h2>Add Hall of Fame Entry</h2><div class="formrow"><input id="hofSeason" placeholder="Season 2026"><input id="hofChampion" placeholder="Champion"><input id="hofRunner" placeholder="Runner-up"><button class="btn" onclick="addHallEntry()">Add Entry</button></div></div>
+      <div class="card"><h2>Hall of Fame</h2><div id="hallList"></div></div>
+    </section>
+
+    <section id="rules" class="page">
+      <div class="card"><h2>League Rules</h2><h3>Match Format</h3><p>Best of 3 games. Each game is to 11 points. Win by 2.</p><h3>Service Rules</h3><p>The server must toss the ball upward before contact. The ball must be visible and not hidden. Serve starts behind the end line and must touch server side first, then opponent side.</p><h3>Basement Rule</h3><p>If the ball hits the ceiling or any basement obstruction, point goes to the opposite player.</p></div>
+    </section>
+
+    <section id="settings" class="page manager-only">
+      <div class="card"><h2>Settings</h2><div class="formgrid"><input id="settingTitle" placeholder="League title"><select id="activeSeasonSelect"></select><input id="managerPasswordSetting" placeholder="Manager password"><input id="scorerPasswordSetting" placeholder="Scorer password"></div><button class="btn" onclick="saveSettings()">Save Settings</button><button class="btn" onclick="exportCSV()">Export Standings CSV</button><button class="btn" onclick="downloadBackup()">Download Backup JSON</button><button class="btn danger" onclick="resetAll()">Reset All Data</button><p class="muted">Passwords are stored in Firebase settings for convenience. This is basic protection for a community site, not enterprise authentication.</p></div>
+    </section>
+  </main>
+
+  <div id="loginModal" class="modal hide"><div class="modal-card"><h2>Login</h2><input id="passwordInput" type="password" placeholder="Enter tournament password"><button class="btn" onclick="loginUser()">Login</button><button class="btn light" onclick="closeLogin()">Cancel</button><p class="muted">Use your authorized manager or scorer password.</p></div></div>
+
+  <script src="assets/firebase-config.js"></script>
+  <script type="module" src="assets/app.js"></script>
+</body>
+</html>
