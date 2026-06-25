@@ -384,6 +384,71 @@ function standingsForGroup(groupId){
 const allGroupStandings=()=>activeGroups().map(g=>({group:g,rows:standingsForGroup(g.id)}));
 function table(rows, cols){ if(!rows.length)return '<p class="muted">No data yet.</p>'; return '<table><thead><tr>'+cols.map(c=>`<th>${c[0]}</th>`).join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+cols.map(c=>`<td>${typeof c[1]==='function'?c[1](r):r[c[1]]}</td>`).join('')+'</tr>').join('')+'</tbody></table>'; }
 
+function csvEscape(value){
+  const v = value == null ? '' : String(value);
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
+}
+function csvDownload(name, rows){
+  download(name, rows.map(r=>r.map(csvEscape).join(',')).join('\n'));
+}
+function scheduleFilterValues(){
+  return {
+    search: (($('scheduleSearch')?.value)||'').trim().toLowerCase(),
+    group: ($('scheduleFilterGroup')?.value)||'',
+    stadium: ($('scheduleFilterStadium')?.value)||'',
+    status: ($('scheduleFilterStatus')?.value)||'',
+    type: ($('scheduleFilterType')?.value)||'',
+    date: ($('scheduleFilterDate')?.value)||''
+  };
+}
+function filteredScheduleRows(){
+  const f = scheduleFilterValues();
+  return activeMatches().filter(m=>!m.isKnockout).filter(m=>{
+    const hay = [m.matchNo, m.a, m.b, m.round, m.type, groupName(m.groupId), stadiumName(m.stadiumId), matchStatus(m)].join(' ').toLowerCase();
+    return (!f.search || hay.includes(f.search)) &&
+      (!f.group || m.groupId===f.group) &&
+      (!f.stadium || m.stadiumId===f.stadium) &&
+      (!f.status || matchStatus(m)===f.status) &&
+      (!f.type || m.type===f.type) &&
+      (!f.date || m.date===f.date);
+  }).sort((a,b)=>(Number(a.matchNo)||999999)-(Number(b.matchNo)||999999));
+}
+function standingsFilterValues(){
+  return { search: (($('standingsSearch')?.value)||'').trim().toLowerCase(), group: ($('standingsFilterGroup')?.value)||'' };
+}
+function filteredGroupStandings(){
+  const f = standingsFilterValues();
+  return allGroupStandings()
+    .filter(g=>!f.group || g.group.id===f.group)
+    .map(g=>({ group:g.group, rows:g.rows.filter(r=>!f.search || r.name.toLowerCase().includes(f.search)) }))
+    .filter(g=>g.rows.length || !f.search);
+}
+function setSelectOptions(id, options, value){
+  const el=$(id); if(!el) return;
+  const old = value ?? el.value;
+  el.innerHTML = options.join('');
+  if([...el.options].some(o=>o.value===old)) el.value = old;
+}
+window.clearScheduleFilters = ()=>{
+  ['scheduleSearch','scheduleFilterGroup','scheduleFilterStadium','scheduleFilterStatus','scheduleFilterType','scheduleFilterDate'].forEach(id=>{ if($(id)) $(id).value=''; });
+  render();
+};
+window.clearStandingsFilters = ()=>{
+  ['standingsSearch','standingsFilterGroup'].forEach(id=>{ if($(id)) $(id).value=''; });
+  render();
+};
+window.exportScheduleCSV = ()=>{
+  const rows = [['Season','Match #','Date','Time','Type','Round','Group','Player 1','Player 2','Stadium','Score','Status','Winner']];
+  filteredScheduleRows().forEach(m=>rows.push([seasonName(activeSeasonId()), m.matchNo||'', m.date||'', m.time||'', m.type||'', m.round||'', groupName(m.groupId), m.a||'', m.b||'', stadiumName(m.stadiumId), matchScoreText(m), matchStatus(m), m.winnerId ? (m.winnerId===m.aId ? m.a : m.b) : '']));
+  csvDownload('skf-tt-schedule.csv', rows);
+};
+window.exportStandingsCSV = ()=>{
+  const rows = [['Season','Group','Rank','Player','Played','Won','Lost','Pts','PF','PA','Diff']];
+  filteredGroupStandings().forEach(g=>g.rows.forEach((r,i)=>rows.push([seasonName(activeSeasonId()), g.group.name, i+1, r.name, r.p, r.w, r.l, r.pts, r.pf, r.pa, r.pf-r.pa])));
+  csvDownload('skf-tt-standings.csv', rows);
+};
+
+
 window.generateKnockouts = async()=>{
   if(!requireManager())return;
   const q=Number($('qualifiersPerGroup').value||2);
@@ -434,18 +499,24 @@ function render(){
   const pOpts=activePlayers().map(p=>`<option value="${p.id}">${p.name}</option>`).join(''); ['manualA','manualB','koA','koB'].forEach(id=>{ if($(id))$(id).innerHTML=pOpts; });
   $('manualGroup').innerHTML='<option value="">No group</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
   $('manualStadium').innerHTML='<option value="">No stadium</option>'+state.stadiums.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
-  const scheduleRows=activeMatches().filter(m=>!m.isKnockout).sort((a,b)=>(Number(a.matchNo)||999999)-(Number(b.matchNo)||999999));
+  setSelectOptions('scheduleFilterGroup',['<option value="">All Groups</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('')]);
+  setSelectOptions('scheduleFilterStadium',['<option value="">All Stadiums</option>'+state.stadiums.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')]);
+  setSelectOptions('scheduleFilterStatus',['<option value="">All Statuses</option>'+['Scheduled','Live','Completed','Walkover','Postponed','Cancelled'].map(x=>`<option value="${x}">${x}</option>`).join('')]);
+  const activeTypes=[...new Set(activeMatches().filter(m=>!m.isKnockout).map(m=>m.type||'Match'))].sort();
+  setSelectOptions('scheduleFilterType',['<option value="">All Types</option>'+activeTypes.map(t=>`<option value="${t}">${t}</option>`).join('')]);
+  setSelectOptions('standingsFilterGroup',['<option value="">All Groups</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('')]);
+  const scheduleRows=filteredScheduleRows();
   $('scheduleList').innerHTML=(isManager?'<div class="manager-inline-actions"><button class="btn light" onclick="renumberMatches()">Renumber Matches</button><span class="muted">Manager can edit match #, date, time, stadium, type and round directly in this schedule.</span></div>':'')+table(scheduleRows,[['#',r=>matchNoEditor(r)],['Date',r=>dateEditor(r)],['Time',r=>timeEditor(r)],['Type',r=>typeEditor(r)],['Round',r=>roundEditor(r)],['Group',r=>groupName(r.groupId)],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumEditor(r)],['Score',r=>matchScoreText(r)],['Status',r=>isManager?`<select class="status-select ${statusClass(r)}" onchange="changeStatus('${r.id}',this.value)">${['Scheduled','Live','Completed','Walkover','Postponed','Cancelled'].map(s=>`<option ${matchStatus(r)===s?'selected':''}>${s}</option>`).join('')}</select>`:statusBadge(r)],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
   $('matchSelect').innerHTML=activeMatches().map(m=>`<option value="${m.id}">${matchStatus(m)} • ${m.type}: ${m.a} vs ${m.b}</option>`).join(''); if(activeMatches().length) loadScoreForm(); else $('scoreForm').innerHTML='';
   $('dashUpcoming').innerHTML=table(activeMatches().filter(m=>matchStatus(m)==='Scheduled' || matchStatus(m)==='Live').slice(0,10),[['#',r=>r.matchNo||'-'],['Date',r=>`${r.date||'-'} ${r.time||''}`],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)]]);
   $('dashLeaderboard').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows.slice(0,4),[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['W','w'],['L','l'],['Pts','pts'],['Diff',r=>r.pf-r.pa]])).join('');
-  $('groupStandings').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows,[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['P','p'],['W','w'],['L','l'],['Pts','pts'],['PF','pf'],['PA','pa'],['Diff',r=>r.pf-r.pa]])).join('');
+  $('groupStandings').innerHTML=filteredGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows,[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['P','p'],['W','w'],['L','l'],['Pts','pts'],['PF','pf'],['PA','pa'],['Diff',r=>r.pf-r.pa]])).join('');
   $('knockoutList').innerHTML=table(activeMatches().filter(m=>m.isKnockout),[['Round','round'],['Match',r=>`${r.a} vs ${r.b}`],['Score',r=>matchScoreText(r)],['Winner',r=>r.winnerId?(r.winnerId===r.aId?r.a:r.b):'-'],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
   $('hallList').innerHTML=table(state.hallOfFame,[['Season','season'],['Champion','champion'],['Runner-up','runner'],['Action',r=>isManager?`<button class="btn danger" onclick="deleteHallEntry('${r.id}')">Delete</button>`:'']]);
   $('activeSeasonSelect').innerHTML=state.seasons.map(s=>`<option value="${s.id}" ${s.id===activeSeasonId()?'selected':''}>${s.name}</option>`).join('');
   $('settingTitle').value=state.settings.title; $('managerPasswordSetting').value=state.settings.managerPassword; $('scorerPasswordSetting').value=state.settings.scorerPassword;
 }
-window.exportCSV=()=>{ let lines=[['Season','Group','Rank','Player','Played','Won','Lost','Pts','PF','PA','Diff']]; allGroupStandings().forEach(g=>g.rows.forEach((r,i)=>lines.push([seasonName(activeSeasonId()),g.group.name,i+1,r.name,r.p,r.w,r.l,r.pts,r.pf,r.pa,r.pf-r.pa]))); download('skf-tt-standings.csv',lines.map(r=>r.join(',')).join('\n')); };
+window.exportCSV=()=>exportStandingsCSV();
 window.downloadBackup=()=>download('skf-tt-league-backup.json',JSON.stringify(state,null,2));
 function download(name,text){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'})); a.download=name; a.click(); }
 window.resetAll=async()=>{ if(!requireManager())return; if(confirm('Reset all league data?')){ state=structuredClone(defaultState); await save(); render(); } };

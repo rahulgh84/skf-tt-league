@@ -26,3 +26,8 @@ td input[type="date"], td input[type="time"], td input.small-input, td select { 
 @media (max-width: 700px){
   td input[type="date"], td input[type="time"], td input.small-input, td select { min-width: 120px; }
 }
+
+/* Export and filter toolbar */
+.toolbar.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0 14px;align-items:center}
+.toolbar.filters input,.toolbar.filters select{width:100%;min-height:38px}
+.toolbar.filters .btn{white-space:nowrap}
