@@ -35,6 +35,15 @@ const seasonName = id => state.seasons.find(s=>s.id===id)?.name || 'No season';
 const activeGroups = () => state.groups.filter(g=>g.seasonId===activeSeasonId());
 const activePlayers = () => state.players.filter(p=>p.seasonId===activeSeasonId());
 const activeMatches = () => state.matches.filter(m=>m.seasonId===activeSeasonId());
+const nextMatchNo = () => Math.max(0, ...activeMatches().map(m=>Number(m.matchNo)||0)) + 1;
+function ensureMatchNumbers(){
+  let changed=false;
+  const sorted=activeMatches().sort((a,b)=>(Number(a.matchNo)||999999)-(Number(b.matchNo)||999999) || (a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||''));
+  let n=1;
+  for(const m of sorted){ if(!m.matchNo){ m.matchNo=n; changed=true; } n++; }
+  return changed;
+}
+
 const groupName = id => state.groups.find(g=>g.id===id)?.name || '-';
 const stadiumName = id => state.stadiums.find(s=>s.id===id)?.name || '-';
 const playerName = id => state.players.find(p=>p.id===id)?.name || '-';
@@ -162,7 +171,7 @@ window.generateGroupMatches = async()=>{
     const list=activePlayers().filter(p=>p.groupId===g.id);
     for(let i=0;i<list.length;i++)for(let j=i+1;j<list.length;j++){
       const exists=state.matches.some(m=>m.seasonId===activeSeasonId() && m.type==='Group Match' && ((m.aId===list[i].id&&m.bId===list[j].id)||(m.aId===list[j].id&&m.bId===list[i].id)));
-      if(!exists) state.matches.push({id:uid(), seasonId:activeSeasonId(), type:'Group Match', status:'Scheduled', round:g.name, groupId:g.id, stadiumId:'', date:'', time:'', aId:list[i].id, bId:list[j].id, a:list[i].name, b:list[j].name, score:'', winnerId:null});
+      if(!exists) state.matches.push({id:uid(), matchNo:nextMatchNo(), seasonId:activeSeasonId(), type:'Group Match', status:'Scheduled', round:g.name, groupId:g.id, stadiumId:'', date:'', time:'', aId:list[i].id, bId:list[j].id, a:list[i].name, b:list[j].name, score:'', winnerId:null});
     }
   }
   await save(); render();
@@ -172,11 +181,29 @@ window.addManualMatch = async()=>{
   if(!requireManager())return;
   const aId=$('manualA').value, bId=$('manualB').value;
   if(!aId||!bId||aId===bId)return alert('Select two different players.');
-  state.matches.push({id:uid(), seasonId:activeSeasonId(), type:$('manualType').value, status:'Scheduled', round:$('manualRound').value.trim() || $('manualType').value, groupId:$('manualGroup').value, stadiumId:$('manualStadium').value, date:$('manualDate').value, time:$('manualTime').value, aId, bId, a:playerName(aId), b:playerName(bId), score:'', winnerId:null});
+  state.matches.push({id:uid(), matchNo:nextMatchNo(), seasonId:activeSeasonId(), type:$('manualType').value, status:'Scheduled', round:$('manualRound').value.trim() || $('manualType').value, groupId:$('manualGroup').value, stadiumId:$('manualStadium').value, date:$('manualDate').value, time:$('manualTime').value, aId, bId, a:playerName(aId), b:playerName(bId), score:'', winnerId:null});
   await save(); render();
 };
 window.deleteMatch = async id=>{ if(!requireManager())return; if(confirm('Delete match?')){ state.matches=state.matches.filter(m=>m.id!==id); await save(); render(); } };
 window.changeStatus = async(id,status)=>{ if(!requireManager())return; const m=state.matches.find(x=>x.id===id); if(m){ m.status=status; await save(); render(); } };
+window.updateMatchField = async(id, field, value)=>{
+  if(!requireManager())return;
+  const m=state.matches.find(x=>x.id===id);
+  if(!m)return;
+  if(field==='matchNo') value = Number(value) || m.matchNo || nextMatchNo();
+  m[field]=value;
+  if(field==='aId'){ m.a=playerName(value); }
+  if(field==='bId'){ m.b=playerName(value); }
+  await save(); render();
+};
+window.renumberMatches = async()=>{
+  if(!requireManager())return;
+  if(!confirm('Renumber active season matches by current order?'))return;
+  const list=activeMatches().filter(m=>!m.isKnockout).sort((a,b)=>(a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||'') || (a.round||'').localeCompare(b.round||'') || (a.a||'').localeCompare(b.a||''));
+  list.forEach((m,i)=>m.matchNo=i+1);
+  await save(); render();
+};
+
 
 function setsFromScore(score){
   return (score||'').split(',').map(g=>g.trim()).filter(Boolean).map(g=>{
@@ -373,15 +400,24 @@ window.generateKnockouts = async()=>{
   }
   await save(); render();
 };
-function addKOMatch(round,a,b,aseed='',bseed=''){ state.matches.push({id:uid(), seasonId:activeSeasonId(), type:round, isKnockout:true, status:'Scheduled', round, groupId:'', stadiumId:'', date:'', time:'', aId:a.id,bId:b.id,a:`${aseed} ${a.name}`.trim(),b:`${bseed} ${b.name}`.trim(),score:'',winnerId:null}); }
-window.addManualKnockout = async()=>{ if(!requireManager())return; const aId=$('koA').value,bId=$('koB').value; if(!aId||!bId||aId===bId)return alert('Select two different players.'); state.matches.push({id:uid(), seasonId:activeSeasonId(), type:$('koRound').value, isKnockout:true, status:'Scheduled', round:$('koRound').value, groupId:'', stadiumId:'', date:'', time:'', aId,bId,a:playerName(aId),b:playerName(bId),score:'',winnerId:null}); await save(); render(); };
+function addKOMatch(round,a,b,aseed='',bseed=''){ state.matches.push({id:uid(), matchNo:nextMatchNo(), seasonId:activeSeasonId(), type:round, isKnockout:true, status:'Scheduled', round, groupId:'', stadiumId:'', date:'', time:'', aId:a.id,bId:b.id,a:`${aseed} ${a.name}`.trim(),b:`${bseed} ${b.name}`.trim(),score:'',winnerId:null}); }
+window.addManualKnockout = async()=>{ if(!requireManager())return; const aId=$('koA').value,bId=$('koB').value; if(!aId||!bId||aId===bId)return alert('Select two different players.'); state.matches.push({id:uid(), matchNo:nextMatchNo(), seasonId:activeSeasonId(), type:$('koRound').value, isKnockout:true, status:'Scheduled', round:$('koRound').value, groupId:'', stadiumId:'', date:'', time:'', aId,bId,a:playerName(aId),b:playerName(bId),score:'',winnerId:null}); await save(); render(); };
 window.clearKnockouts = async()=>{ if(!requireManager())return; if(confirm('Clear knockout matches?')){ state.matches=state.matches.filter(m=>!(m.seasonId===activeSeasonId()&&m.isKnockout)); await save(); render(); } };
 
 window.addHallEntry = async()=>{ if(!requireManager())return; const season=$('hofSeason').value.trim(), champion=$('hofChampion').value.trim(), runner=$('hofRunner').value.trim(); if(!season||!champion)return; state.hallOfFame.push({id:uid(),season,champion,runner}); $('hofSeason').value='';$('hofChampion').value='';$('hofRunner').value=''; await save(); render(); };
 window.deleteHallEntry = async id=>{ if(!requireManager())return; state.hallOfFame=state.hallOfFame.filter(h=>h.id!==id); await save(); render(); };
 window.saveSettings = async()=>{ if(!requireManager())return; state.settings.title=$('settingTitle').value.trim()||state.settings.title; state.settings.activeSeasonId=$('activeSeasonSelect').value; state.settings.managerPassword=$('managerPasswordSetting').value.trim()||state.settings.managerPassword; state.settings.scorerPassword=$('scorerPasswordSetting').value.trim()||state.settings.scorerPassword; await save(); render(); };
 
+
+function matchNoEditor(m){ return isManager ? `<input class="small-input" type="number" value="${m.matchNo||''}" onchange="updateMatchField('${m.id}','matchNo',this.value)">` : (m.matchNo||'-'); }
+function dateEditor(m){ return isManager ? `<input type="date" value="${m.date||''}" onchange="updateMatchField('${m.id}','date',this.value)">` : (m.date||'-'); }
+function timeEditor(m){ return isManager ? `<input type="time" value="${m.time||''}" onchange="updateMatchField('${m.id}','time',this.value)">` : (m.time||''); }
+function stadiumEditor(m){ return isManager ? `<select onchange="updateMatchField('${m.id}','stadiumId',this.value)"><option value="">No stadium</option>${state.stadiums.map(s=>`<option value="${s.id}" ${s.id===m.stadiumId?'selected':''}>${s.name}</option>`).join('')}</select>` : stadiumName(m.stadiumId); }
+function roundEditor(m){ return isManager ? `<input value="${m.round||''}" onchange="updateMatchField('${m.id}','round',this.value)">` : (m.round||'-'); }
+function typeEditor(m){ return isManager ? `<select onchange="updateMatchField('${m.id}','type',this.value)">${['Group Match','Quarter Final','Semi Final','Final','Third Place','Friendly'].map(t=>`<option ${m.type===t?'selected':''}>${t}</option>`).join('')}</select>` : (m.type||'-'); }
+
 function render(){
+  ensureMatchNumbers();
   setRole();
   updateSyncBadge();
   $('appTitle').textContent=state.settings.title;
@@ -398,10 +434,10 @@ function render(){
   const pOpts=activePlayers().map(p=>`<option value="${p.id}">${p.name}</option>`).join(''); ['manualA','manualB','koA','koB'].forEach(id=>{ if($(id))$(id).innerHTML=pOpts; });
   $('manualGroup').innerHTML='<option value="">No group</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
   $('manualStadium').innerHTML='<option value="">No stadium</option>'+state.stadiums.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
-  const scheduleRows=activeMatches().filter(m=>!m.isKnockout);
-  $('scheduleList').innerHTML=table(scheduleRows,[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Type','type'],['Group',r=>groupName(r.groupId)],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)],['Score',r=>matchScoreText(r)],['Status',r=>isManager?`<select class="status-select ${statusClass(r)}" onchange="changeStatus('${r.id}',this.value)">${['Scheduled','Live','Completed','Walkover','Postponed','Cancelled'].map(s=>`<option ${matchStatus(r)===s?'selected':''}>${s}</option>`).join('')}</select>`:statusBadge(r)],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
+  const scheduleRows=activeMatches().filter(m=>!m.isKnockout).sort((a,b)=>(Number(a.matchNo)||999999)-(Number(b.matchNo)||999999));
+  $('scheduleList').innerHTML=(isManager?'<div class="manager-inline-actions"><button class="btn light" onclick="renumberMatches()">Renumber Matches</button><span class="muted">Manager can edit match #, date, time, stadium, type and round directly in this schedule.</span></div>':'')+table(scheduleRows,[['#',r=>matchNoEditor(r)],['Date',r=>dateEditor(r)],['Time',r=>timeEditor(r)],['Type',r=>typeEditor(r)],['Round',r=>roundEditor(r)],['Group',r=>groupName(r.groupId)],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumEditor(r)],['Score',r=>matchScoreText(r)],['Status',r=>isManager?`<select class="status-select ${statusClass(r)}" onchange="changeStatus('${r.id}',this.value)">${['Scheduled','Live','Completed','Walkover','Postponed','Cancelled'].map(s=>`<option ${matchStatus(r)===s?'selected':''}>${s}</option>`).join('')}</select>`:statusBadge(r)],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
   $('matchSelect').innerHTML=activeMatches().map(m=>`<option value="${m.id}">${matchStatus(m)} • ${m.type}: ${m.a} vs ${m.b}</option>`).join(''); if(activeMatches().length) loadScoreForm(); else $('scoreForm').innerHTML='';
-  $('dashUpcoming').innerHTML=table(activeMatches().filter(m=>matchStatus(m)==='Scheduled' || matchStatus(m)==='Live').slice(0,10),[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)]]);
+  $('dashUpcoming').innerHTML=table(activeMatches().filter(m=>matchStatus(m)==='Scheduled' || matchStatus(m)==='Live').slice(0,10),[['#',r=>r.matchNo||'-'],['Date',r=>`${r.date||'-'} ${r.time||''}`],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)]]);
   $('dashLeaderboard').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows.slice(0,4),[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['W','w'],['L','l'],['Pts','pts'],['Diff',r=>r.pf-r.pa]])).join('');
   $('groupStandings').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows,[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['P','p'],['W','w'],['L','l'],['Pts','pts'],['PF','pf'],['PA','pa'],['Diff',r=>r.pf-r.pa]])).join('');
   $('knockoutList').innerHTML=table(activeMatches().filter(m=>m.isKnockout),[['Round','round'],['Match',r=>`${r.a} vs ${r.b}`],['Score',r=>matchScoreText(r)],['Winner',r=>r.winnerId?(r.winnerId===r.aId?r.a:r.b):'-'],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);

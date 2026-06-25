@@ -18,3 +18,11 @@
 .match-status{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 10px;font-weight:900;font-size:12px;white-space:nowrap;border:1px solid #d7dfeb}
 .status-Scheduled{background:#fff7d6;color:#7a5600;border-color:#f5c542}.status-Live{background:#ffe4e4;color:#b00020;border-color:#e53935}.status-Completed{background:#e4f8ed;color:#087a3b;border-color:#19a35b}.status-Walkover{background:#eef5ff;color:#0d47a1}.status-Postponed,.status-Cancelled{background:#f4e6e6;color:#8a1c1c;border-color:#c62828}
 .status-select{font-weight:900;border-width:2px}.status-select.status-Scheduled{background:#fff7d6}.status-select.status-Live{background:#ffe4e4}.status-select.status-Completed{background:#e4f8ed}
+
+/* Schedule editor enhancements */
+.small-input { max-width: 78px; }
+.manager-inline-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+td input[type="date"], td input[type="time"], td input.small-input, td select { min-width: 86px; }
+@media (max-width: 700px){
+  td input[type="date"], td input[type="time"], td input.small-input, td select { min-width: 120px; }
+}
