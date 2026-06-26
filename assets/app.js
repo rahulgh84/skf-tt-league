@@ -35,15 +35,6 @@ const seasonName = id => state.seasons.find(s=>s.id===id)?.name || 'No season';
 const activeGroups = () => state.groups.filter(g=>g.seasonId===activeSeasonId());
 const activePlayers = () => state.players.filter(p=>p.seasonId===activeSeasonId());
 const activeMatches = () => state.matches.filter(m=>m.seasonId===activeSeasonId());
-const nextMatchNo = () => Math.max(0, ...activeMatches().map(m=>Number(m.matchNo)||0)) + 1;
-function ensureMatchNumbers(){
-  let changed=false;
-  const sorted=activeMatches().sort((a,b)=>(Number(a.matchNo)||999999)-(Number(b.matchNo)||999999) || (a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||''));
-  let n=1;
-  for(const m of sorted){ if(!m.matchNo){ m.matchNo=n; changed=true; } n++; }
-  return changed;
-}
-
 const groupName = id => state.groups.find(g=>g.id===id)?.name || '-';
 const stadiumName = id => state.stadiums.find(s=>s.id===id)?.name || '-';
 const playerName = id => state.players.find(p=>p.id===id)?.name || '-';
@@ -171,7 +162,7 @@ window.generateGroupMatches = async()=>{
     const list=activePlayers().filter(p=>p.groupId===g.id);
     for(let i=0;i<list.length;i++)for(let j=i+1;j<list.length;j++){
       const exists=state.matches.some(m=>m.seasonId===activeSeasonId() && m.type==='Group Match' && ((m.aId===list[i].id&&m.bId===list[j].id)||(m.aId===list[j].id&&m.bId===list[i].id)));
-      if(!exists) state.matches.push({id:uid(), matchNo:nextMatchNo(), seasonId:activeSeasonId(), type:'Group Match', status:'Scheduled', round:g.name, groupId:g.id, stadiumId:'', date:'', time:'', aId:list[i].id, bId:list[j].id, a:list[i].name, b:list[j].name, score:'', winnerId:null});
+      if(!exists) state.matches.push({id:uid(), seasonId:activeSeasonId(), type:'Group Match', status:'Scheduled', round:g.name, groupId:g.id, stadiumId:'', date:'', time:'', aId:list[i].id, bId:list[j].id, a:list[i].name, b:list[j].name, score:'', winnerId:null});
     }
   }
   await save(); render();
@@ -181,29 +172,11 @@ window.addManualMatch = async()=>{
   if(!requireManager())return;
   const aId=$('manualA').value, bId=$('manualB').value;
   if(!aId||!bId||aId===bId)return alert('Select two different players.');
-  state.matches.push({id:uid(), matchNo:nextMatchNo(), seasonId:activeSeasonId(), type:$('manualType').value, status:'Scheduled', round:$('manualRound').value.trim() || $('manualType').value, groupId:$('manualGroup').value, stadiumId:$('manualStadium').value, date:$('manualDate').value, time:$('manualTime').value, aId, bId, a:playerName(aId), b:playerName(bId), score:'', winnerId:null});
+  state.matches.push({id:uid(), seasonId:activeSeasonId(), type:$('manualType').value, status:'Scheduled', round:$('manualRound').value.trim() || $('manualType').value, groupId:$('manualGroup').value, stadiumId:$('manualStadium').value, date:$('manualDate').value, time:$('manualTime').value, aId, bId, a:playerName(aId), b:playerName(bId), score:'', winnerId:null});
   await save(); render();
 };
 window.deleteMatch = async id=>{ if(!requireManager())return; if(confirm('Delete match?')){ state.matches=state.matches.filter(m=>m.id!==id); await save(); render(); } };
 window.changeStatus = async(id,status)=>{ if(!requireManager())return; const m=state.matches.find(x=>x.id===id); if(m){ m.status=status; await save(); render(); } };
-window.updateMatchField = async(id, field, value)=>{
-  if(!requireManager())return;
-  const m=state.matches.find(x=>x.id===id);
-  if(!m)return;
-  if(field==='matchNo') value = Number(value) || m.matchNo || nextMatchNo();
-  m[field]=value;
-  if(field==='aId'){ m.a=playerName(value); }
-  if(field==='bId'){ m.b=playerName(value); }
-  await save(); render();
-};
-window.renumberMatches = async()=>{
-  if(!requireManager())return;
-  if(!confirm('Renumber active season matches by current order?'))return;
-  const list=activeMatches().filter(m=>!m.isKnockout).sort((a,b)=>(a.date||'').localeCompare(b.date||'') || (a.time||'').localeCompare(b.time||'') || (a.round||'').localeCompare(b.round||'') || (a.a||'').localeCompare(b.a||''));
-  list.forEach((m,i)=>m.matchNo=i+1);
-  await save(); render();
-};
-
 
 function setsFromScore(score){
   return (score||'').split(',').map(g=>g.trim()).filter(Boolean).map(g=>{
@@ -276,7 +249,7 @@ function matchStatus(m){
 function statusClass(m){ return 'status-' + matchStatus(m).replace(/\s+/g,'-'); }
 function statusBadge(m){
   const s = matchStatus(m);
-  const icon = s === 'Scheduled' ? '🟡' : s === 'Live' ? '🔴' : s === 'Completed' ? '🟢' : '';
+  const icon = s === 'Scheduled' ? '🟡' : s === 'Live' ? '🔴' : s === 'Completed' ? '🟢' : s === 'Walkover' ? '🏳️' : '';
   return `<span class="match-status ${statusClass(m)}">${icon} ${s}</span>`;
 }
 function liveSetsHtml(m){
@@ -287,8 +260,47 @@ function liveSetsHtml(m){
     return `<div class="set-pill ${i===cur?'current':''}"><b>Game ${i+1}</b><span>${s.a||0}-${s.b||0}</span><small>${w==='A'?m.a:w==='B'?m.b:s.done?'Done':'Live'}</small></div>`;
   }).join('')}</div>`;
 }
+
+function scoreMatchLabel(m){
+  const no = m.matchNumber || m.serial || m.no || '';
+  const noText = no ? `#${no} • ` : '';
+  const where = stadiumName(m.stadiumId);
+  return `${noText}${matchStatus(m)} • ${m.type}: ${m.a} vs ${m.b}${where && where !== '-' ? ' • '+where : ''}`;
+}
+function filteredScoreMatches(){
+  const q = (scoreMatchSearch || '').trim().toLowerCase();
+  const matches = activeMatches();
+  if(!q) return matches;
+  return matches.filter(m => [
+    m.matchNumber, m.serial, m.no, m.type, m.round, m.a, m.b,
+    groupName(m.groupId), stadiumName(m.stadiumId), matchStatus(m)
+  ].join(' ').toLowerCase().includes(q));
+}
+window.filterScoreMatches = () => {
+  scoreMatchSearch = $('matchSearch')?.value || '';
+  renderScoreMatchSelect();
+};
+window.selectScoreMatch = (id) => {
+  selectedScoreMatchId = id || '';
+  if(selectedScoreMatchId) localStorage.setItem('skf_tt_selected_match', selectedScoreMatchId);
+  loadScoreForm();
+};
+function renderScoreMatchSelect(){
+  const select = $('matchSelect');
+  if(!select) return;
+  const matches = filteredScoreMatches();
+  select.innerHTML = matches.map(m=>`<option value="${m.id}">${scoreMatchLabel(m)}</option>`).join('');
+  const stillVisible = matches.some(m=>m.id===selectedScoreMatchId);
+  if(!selectedScoreMatchId || !stillVisible){
+    selectedScoreMatchId = matches[0]?.id || '';
+    if(selectedScoreMatchId) localStorage.setItem('skf_tt_selected_match', selectedScoreMatchId);
+  }
+  if(selectedScoreMatchId) select.value = selectedScoreMatchId;
+  if(!matches.length) $('scoreForm').innerHTML = '<p class="muted">No matches found.</p>';
+}
 window.loadScoreForm = ()=>{
-  const m=activeMatches().find(x=>x.id===$('matchSelect').value);
+  const id = selectedScoreMatchId || $('matchSelect')?.value;
+  const m=activeMatches().find(x=>x.id===id);
   if(!m){ $('scoreForm').innerHTML=''; return; }
   normalizeLiveMatch(m);
   const r=matchResultFromSets(m), idx=currentSetIndex(m), cur=m.sets[idx] || {a:0,b:0};
@@ -312,6 +324,13 @@ window.loadScoreForm = ()=>{
         <button class="btn light" onclick="undoPoint('${m.id}')">Undo Last Point</button>
         <button class="btn light" onclick="nextGame('${m.id}')">Start Next Game</button>
         <button class="btn danger" onclick="resetLiveScore('${m.id}')">Reset Score</button>
+      </div>
+      <hr>
+      <h4>Walkover / Forfeit</h4>
+      <p class="muted">Use this only when one player does not show up or is not willing/able to play. Winner gets 2 points. PF/PA/Diff stay 0 for this match.</p>
+      <div class="formrow walkover-actions">
+        <button class="btn walkover" onclick="declareWalkover('${m.id}','A')">Declare ${m.a} Walkover Win</button>
+        <button class="btn walkover" onclick="declareWalkover('${m.id}','B')">Declare ${m.b} Walkover Win</button>
       </div>
       <hr>
       <p class="muted">Optional final/manual score entry:</p>
@@ -364,10 +383,29 @@ window.resetLiveScore = async id=>{
   m.sets=[{a:0,b:0,done:false}]; m.pointHistory=[]; m.score=''; m.winnerId=null; m.status='Scheduled';
   await save(); render(); loadScoreForm();
 };
+
+window.declareWalkover = async (id, side)=>{
+  if(!requireScorer())return;
+  const m=state.matches.find(x=>x.id===id); if(!m)return;
+  const winnerName = side==='A' ? m.a : m.b;
+  if(!confirm(`Declare walkover win for ${winnerName}?`)) return;
+  m.sets=[];
+  m.pointHistory=[];
+  m.score='W/O';
+  m.winnerId = side==='A' ? m.aId : m.bId;
+  m.status='Walkover';
+  m.completedAt=new Date().toISOString();
+  await save(); render(); loadScoreForm();
+};
+
 window.saveScore = async id=>{
   if(!requireScorer())return;
   const m=state.matches.find(x=>x.id===id); if(!m)return;
   m.score=$('scoreInput').value.trim();
+  if(/^w\/?o$/i.test(m.score) || /^walkover$/i.test(m.score)){
+    alert('For walkover, use the Walkover buttons so the winner is selected correctly.');
+    return;
+  }
   m.sets=setsFromScore(m.score);
   if(!m.sets.length) m.sets=[{a:0,b:0,done:false}];
   m.pointHistory=[];
@@ -378,76 +416,21 @@ window.saveScore = async id=>{
 
 function standingsForGroup(groupId){
   const rows=activePlayers().filter(p=>p.groupId===groupId).map(p=>({id:p.id,name:p.name,p:0,w:0,l:0,pts:0,pf:0,pa:0}));
-  activeMatches().filter(m=>m.groupId===groupId&&m.type==='Group Match'&&m.score).forEach(m=>{ const A=rows.find(r=>r.id===m.aId), B=rows.find(r=>r.id===m.bId); if(!A||!B)return; const s=parseScore(m.score); A.p++;B.p++;A.pf+=s.pfa;A.pa+=s.pfb;B.pf+=s.pfb;B.pa+=s.pfa; if(m.winnerId===m.aId){A.w++;A.pts+=2;B.l++;}else if(m.winnerId===m.bId){B.w++;B.pts+=2;A.l++;} });
+  activeMatches().filter(m=>m.groupId===groupId&&m.type==='Group Match'&&m.score).forEach(m=>{
+    const A=rows.find(r=>r.id===m.aId), B=rows.find(r=>r.id===m.bId); if(!A||!B)return;
+    A.p++; B.p++;
+    if(matchStatus(m)==='Walkover'){
+      if(m.winnerId===m.aId){ A.w++; A.pts+=2; B.l++; }
+      else if(m.winnerId===m.bId){ B.w++; B.pts+=2; A.l++; }
+      return;
+    }
+    const s=parseScore(m.score); A.pf+=s.pfa; A.pa+=s.pfb; B.pf+=s.pfb; B.pa+=s.pfa;
+    if(m.winnerId===m.aId){A.w++;A.pts+=2;B.l++;}else if(m.winnerId===m.bId){B.w++;B.pts+=2;A.l++;}
+  });
   return rows.sort((a,b)=>b.pts-a.pts || (b.pf-b.pa)-(a.pf-a.pa) || b.pf-a.pf || a.name.localeCompare(b.name));
 }
 const allGroupStandings=()=>activeGroups().map(g=>({group:g,rows:standingsForGroup(g.id)}));
 function table(rows, cols){ if(!rows.length)return '<p class="muted">No data yet.</p>'; return '<table><thead><tr>'+cols.map(c=>`<th>${c[0]}</th>`).join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+cols.map(c=>`<td>${typeof c[1]==='function'?c[1](r):r[c[1]]}</td>`).join('')+'</tr>').join('')+'</tbody></table>'; }
-
-function csvEscape(value){
-  const v = value == null ? '' : String(value);
-  return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v;
-}
-function csvDownload(name, rows){
-  download(name, rows.map(r=>r.map(csvEscape).join(',')).join('\n'));
-}
-function scheduleFilterValues(){
-  return {
-    search: (($('scheduleSearch')?.value)||'').trim().toLowerCase(),
-    group: ($('scheduleFilterGroup')?.value)||'',
-    stadium: ($('scheduleFilterStadium')?.value)||'',
-    status: ($('scheduleFilterStatus')?.value)||'',
-    type: ($('scheduleFilterType')?.value)||'',
-    date: ($('scheduleFilterDate')?.value)||''
-  };
-}
-function filteredScheduleRows(){
-  const f = scheduleFilterValues();
-  return activeMatches().filter(m=>!m.isKnockout).filter(m=>{
-    const hay = [m.matchNo, m.a, m.b, m.round, m.type, groupName(m.groupId), stadiumName(m.stadiumId), matchStatus(m)].join(' ').toLowerCase();
-    return (!f.search || hay.includes(f.search)) &&
-      (!f.group || m.groupId===f.group) &&
-      (!f.stadium || m.stadiumId===f.stadium) &&
-      (!f.status || matchStatus(m)===f.status) &&
-      (!f.type || m.type===f.type) &&
-      (!f.date || m.date===f.date);
-  }).sort((a,b)=>(Number(a.matchNo)||999999)-(Number(b.matchNo)||999999));
-}
-function standingsFilterValues(){
-  return { search: (($('standingsSearch')?.value)||'').trim().toLowerCase(), group: ($('standingsFilterGroup')?.value)||'' };
-}
-function filteredGroupStandings(){
-  const f = standingsFilterValues();
-  return allGroupStandings()
-    .filter(g=>!f.group || g.group.id===f.group)
-    .map(g=>({ group:g.group, rows:g.rows.filter(r=>!f.search || r.name.toLowerCase().includes(f.search)) }))
-    .filter(g=>g.rows.length || !f.search);
-}
-function setSelectOptions(id, options, value){
-  const el=$(id); if(!el) return;
-  const old = value ?? el.value;
-  el.innerHTML = options.join('');
-  if([...el.options].some(o=>o.value===old)) el.value = old;
-}
-window.clearScheduleFilters = ()=>{
-  ['scheduleSearch','scheduleFilterGroup','scheduleFilterStadium','scheduleFilterStatus','scheduleFilterType','scheduleFilterDate'].forEach(id=>{ if($(id)) $(id).value=''; });
-  render();
-};
-window.clearStandingsFilters = ()=>{
-  ['standingsSearch','standingsFilterGroup'].forEach(id=>{ if($(id)) $(id).value=''; });
-  render();
-};
-window.exportScheduleCSV = ()=>{
-  const rows = [['Season','Match #','Date','Time','Type','Round','Group','Player 1','Player 2','Stadium','Score','Status','Winner']];
-  filteredScheduleRows().forEach(m=>rows.push([seasonName(activeSeasonId()), m.matchNo||'', m.date||'', m.time||'', m.type||'', m.round||'', groupName(m.groupId), m.a||'', m.b||'', stadiumName(m.stadiumId), matchScoreText(m), matchStatus(m), m.winnerId ? (m.winnerId===m.aId ? m.a : m.b) : '']));
-  csvDownload('skf-tt-schedule.csv', rows);
-};
-window.exportStandingsCSV = ()=>{
-  const rows = [['Season','Group','Rank','Player','Played','Won','Lost','Pts','PF','PA','Diff']];
-  filteredGroupStandings().forEach(g=>g.rows.forEach((r,i)=>rows.push([seasonName(activeSeasonId()), g.group.name, i+1, r.name, r.p, r.w, r.l, r.pts, r.pf, r.pa, r.pf-r.pa])));
-  csvDownload('skf-tt-standings.csv', rows);
-};
-
 
 window.generateKnockouts = async()=>{
   if(!requireManager())return;
@@ -465,24 +448,15 @@ window.generateKnockouts = async()=>{
   }
   await save(); render();
 };
-function addKOMatch(round,a,b,aseed='',bseed=''){ state.matches.push({id:uid(), matchNo:nextMatchNo(), seasonId:activeSeasonId(), type:round, isKnockout:true, status:'Scheduled', round, groupId:'', stadiumId:'', date:'', time:'', aId:a.id,bId:b.id,a:`${aseed} ${a.name}`.trim(),b:`${bseed} ${b.name}`.trim(),score:'',winnerId:null}); }
-window.addManualKnockout = async()=>{ if(!requireManager())return; const aId=$('koA').value,bId=$('koB').value; if(!aId||!bId||aId===bId)return alert('Select two different players.'); state.matches.push({id:uid(), matchNo:nextMatchNo(), seasonId:activeSeasonId(), type:$('koRound').value, isKnockout:true, status:'Scheduled', round:$('koRound').value, groupId:'', stadiumId:'', date:'', time:'', aId,bId,a:playerName(aId),b:playerName(bId),score:'',winnerId:null}); await save(); render(); };
+function addKOMatch(round,a,b,aseed='',bseed=''){ state.matches.push({id:uid(), seasonId:activeSeasonId(), type:round, isKnockout:true, status:'Scheduled', round, groupId:'', stadiumId:'', date:'', time:'', aId:a.id,bId:b.id,a:`${aseed} ${a.name}`.trim(),b:`${bseed} ${b.name}`.trim(),score:'',winnerId:null}); }
+window.addManualKnockout = async()=>{ if(!requireManager())return; const aId=$('koA').value,bId=$('koB').value; if(!aId||!bId||aId===bId)return alert('Select two different players.'); state.matches.push({id:uid(), seasonId:activeSeasonId(), type:$('koRound').value, isKnockout:true, status:'Scheduled', round:$('koRound').value, groupId:'', stadiumId:'', date:'', time:'', aId,bId,a:playerName(aId),b:playerName(bId),score:'',winnerId:null}); await save(); render(); };
 window.clearKnockouts = async()=>{ if(!requireManager())return; if(confirm('Clear knockout matches?')){ state.matches=state.matches.filter(m=>!(m.seasonId===activeSeasonId()&&m.isKnockout)); await save(); render(); } };
 
 window.addHallEntry = async()=>{ if(!requireManager())return; const season=$('hofSeason').value.trim(), champion=$('hofChampion').value.trim(), runner=$('hofRunner').value.trim(); if(!season||!champion)return; state.hallOfFame.push({id:uid(),season,champion,runner}); $('hofSeason').value='';$('hofChampion').value='';$('hofRunner').value=''; await save(); render(); };
 window.deleteHallEntry = async id=>{ if(!requireManager())return; state.hallOfFame=state.hallOfFame.filter(h=>h.id!==id); await save(); render(); };
 window.saveSettings = async()=>{ if(!requireManager())return; state.settings.title=$('settingTitle').value.trim()||state.settings.title; state.settings.activeSeasonId=$('activeSeasonSelect').value; state.settings.managerPassword=$('managerPasswordSetting').value.trim()||state.settings.managerPassword; state.settings.scorerPassword=$('scorerPasswordSetting').value.trim()||state.settings.scorerPassword; await save(); render(); };
 
-
-function matchNoEditor(m){ return isManager ? `<input class="small-input" type="number" value="${m.matchNo||''}" onchange="updateMatchField('${m.id}','matchNo',this.value)">` : (m.matchNo||'-'); }
-function dateEditor(m){ return isManager ? `<input type="date" value="${m.date||''}" onchange="updateMatchField('${m.id}','date',this.value)">` : (m.date||'-'); }
-function timeEditor(m){ return isManager ? `<input type="time" value="${m.time||''}" onchange="updateMatchField('${m.id}','time',this.value)">` : (m.time||''); }
-function stadiumEditor(m){ return isManager ? `<select onchange="updateMatchField('${m.id}','stadiumId',this.value)"><option value="">No stadium</option>${state.stadiums.map(s=>`<option value="${s.id}" ${s.id===m.stadiumId?'selected':''}>${s.name}</option>`).join('')}</select>` : stadiumName(m.stadiumId); }
-function roundEditor(m){ return isManager ? `<input value="${m.round||''}" onchange="updateMatchField('${m.id}','round',this.value)">` : (m.round||'-'); }
-function typeEditor(m){ return isManager ? `<select onchange="updateMatchField('${m.id}','type',this.value)">${['Group Match','Quarter Final','Semi Final','Final','Third Place','Friendly'].map(t=>`<option ${m.type===t?'selected':''}>${t}</option>`).join('')}</select>` : (m.type||'-'); }
-
 function render(){
-  ensureMatchNumbers();
   setRole();
   updateSyncBadge();
   $('appTitle').textContent=state.settings.title;
@@ -499,24 +473,19 @@ function render(){
   const pOpts=activePlayers().map(p=>`<option value="${p.id}">${p.name}</option>`).join(''); ['manualA','manualB','koA','koB'].forEach(id=>{ if($(id))$(id).innerHTML=pOpts; });
   $('manualGroup').innerHTML='<option value="">No group</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
   $('manualStadium').innerHTML='<option value="">No stadium</option>'+state.stadiums.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
-  setSelectOptions('scheduleFilterGroup',['<option value="">All Groups</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('')]);
-  setSelectOptions('scheduleFilterStadium',['<option value="">All Stadiums</option>'+state.stadiums.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')]);
-  setSelectOptions('scheduleFilterStatus',['<option value="">All Statuses</option>'+['Scheduled','Live','Completed','Walkover','Postponed','Cancelled'].map(x=>`<option value="${x}">${x}</option>`).join('')]);
-  const activeTypes=[...new Set(activeMatches().filter(m=>!m.isKnockout).map(m=>m.type||'Match'))].sort();
-  setSelectOptions('scheduleFilterType',['<option value="">All Types</option>'+activeTypes.map(t=>`<option value="${t}">${t}</option>`).join('')]);
-  setSelectOptions('standingsFilterGroup',['<option value="">All Groups</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('')]);
-  const scheduleRows=filteredScheduleRows();
-  $('scheduleList').innerHTML=(isManager?'<div class="manager-inline-actions"><button class="btn light" onclick="renumberMatches()">Renumber Matches</button><span class="muted">Manager can edit match #, date, time, stadium, type and round directly in this schedule.</span></div>':'')+table(scheduleRows,[['#',r=>matchNoEditor(r)],['Date',r=>dateEditor(r)],['Time',r=>timeEditor(r)],['Type',r=>typeEditor(r)],['Round',r=>roundEditor(r)],['Group',r=>groupName(r.groupId)],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumEditor(r)],['Score',r=>matchScoreText(r)],['Status',r=>isManager?`<select class="status-select ${statusClass(r)}" onchange="changeStatus('${r.id}',this.value)">${['Scheduled','Live','Completed','Walkover','Postponed','Cancelled'].map(s=>`<option ${matchStatus(r)===s?'selected':''}>${s}</option>`).join('')}</select>`:statusBadge(r)],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
-  $('matchSelect').innerHTML=activeMatches().map(m=>`<option value="${m.id}">${matchStatus(m)} • ${m.type}: ${m.a} vs ${m.b}</option>`).join(''); if(activeMatches().length) loadScoreForm(); else $('scoreForm').innerHTML='';
-  $('dashUpcoming').innerHTML=table(activeMatches().filter(m=>matchStatus(m)==='Scheduled' || matchStatus(m)==='Live').slice(0,10),[['#',r=>r.matchNo||'-'],['Date',r=>`${r.date||'-'} ${r.time||''}`],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)]]);
+  const scheduleRows=activeMatches().filter(m=>!m.isKnockout);
+  $('scheduleList').innerHTML=table(scheduleRows,[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Type','type'],['Group',r=>groupName(r.groupId)],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)],['Score',r=>matchScoreText(r)],['Status',r=>isManager?`<select class="status-select ${statusClass(r)}" onchange="changeStatus('${r.id}',this.value)">${['Scheduled','Live','Completed','Walkover','Postponed','Cancelled'].map(s=>`<option ${matchStatus(r)===s?'selected':''}>${s}</option>`).join('')}</select>`:statusBadge(r)],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
+  if($('matchSearch')) $('matchSearch').value = scoreMatchSearch;
+  renderScoreMatchSelect(); if(filteredScoreMatches().length) loadScoreForm(); else if($('scoreForm')) $('scoreForm').innerHTML='<p class="muted">No matches found.</p>';
+  $('dashUpcoming').innerHTML=table(activeMatches().filter(m=>matchStatus(m)==='Scheduled' || matchStatus(m)==='Live').slice(0,10),[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)]]);
   $('dashLeaderboard').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows.slice(0,4),[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['W','w'],['L','l'],['Pts','pts'],['Diff',r=>r.pf-r.pa]])).join('');
-  $('groupStandings').innerHTML=filteredGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows,[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['P','p'],['W','w'],['L','l'],['Pts','pts'],['PF','pf'],['PA','pa'],['Diff',r=>r.pf-r.pa]])).join('');
+  $('groupStandings').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows,[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['P','p'],['W','w'],['L','l'],['Pts','pts'],['PF','pf'],['PA','pa'],['Diff',r=>r.pf-r.pa]])).join('');
   $('knockoutList').innerHTML=table(activeMatches().filter(m=>m.isKnockout),[['Round','round'],['Match',r=>`${r.a} vs ${r.b}`],['Score',r=>matchScoreText(r)],['Winner',r=>r.winnerId?(r.winnerId===r.aId?r.a:r.b):'-'],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
   $('hallList').innerHTML=table(state.hallOfFame,[['Season','season'],['Champion','champion'],['Runner-up','runner'],['Action',r=>isManager?`<button class="btn danger" onclick="deleteHallEntry('${r.id}')">Delete</button>`:'']]);
   $('activeSeasonSelect').innerHTML=state.seasons.map(s=>`<option value="${s.id}" ${s.id===activeSeasonId()?'selected':''}>${s.name}</option>`).join('');
   $('settingTitle').value=state.settings.title; $('managerPasswordSetting').value=state.settings.managerPassword; $('scorerPasswordSetting').value=state.settings.scorerPassword;
 }
-window.exportCSV=()=>exportStandingsCSV();
+window.exportCSV=()=>{ let lines=[['Season','Group','Rank','Player','Played','Won','Lost','Pts','PF','PA','Diff']]; allGroupStandings().forEach(g=>g.rows.forEach((r,i)=>lines.push([seasonName(activeSeasonId()),g.group.name,i+1,r.name,r.p,r.w,r.l,r.pts,r.pf,r.pa,r.pf-r.pa]))); download('skf-tt-standings.csv',lines.map(r=>r.join(',')).join('\n')); };
 window.downloadBackup=()=>download('skf-tt-league-backup.json',JSON.stringify(state,null,2));
 function download(name,text){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'})); a.download=name; a.click(); }
 window.resetAll=async()=>{ if(!requireManager())return; if(confirm('Reset all league data?')){ state=structuredClone(defaultState); await save(); render(); } };

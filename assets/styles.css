@@ -19,15 +19,4 @@
 .status-Scheduled{background:#fff7d6;color:#7a5600;border-color:#f5c542}.status-Live{background:#ffe4e4;color:#b00020;border-color:#e53935}.status-Completed{background:#e4f8ed;color:#087a3b;border-color:#19a35b}.status-Walkover{background:#eef5ff;color:#0d47a1}.status-Postponed,.status-Cancelled{background:#f4e6e6;color:#8a1c1c;border-color:#c62828}
 .status-select{font-weight:900;border-width:2px}.status-select.status-Scheduled{background:#fff7d6}.status-select.status-Live{background:#ffe4e4}.status-select.status-Completed{background:#e4f8ed}
 
-/* Schedule editor enhancements */
-.small-input { max-width: 78px; }
-.manager-inline-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
-td input[type="date"], td input[type="time"], td input.small-input, td select { min-width: 86px; }
-@media (max-width: 700px){
-  td input[type="date"], td input[type="time"], td input.small-input, td select { min-width: 120px; }
-}
-
-/* Export and filter toolbar */
-.toolbar.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0 14px;align-items:center}
-.toolbar.filters input,.toolbar.filters select{width:100%;min-height:38px}
-.toolbar.filters .btn{white-space:nowrap}
+.full-input{width:100%;margin:8px 0 12px}.walkover-actions .btn.walkover{background:#6b7280;color:white}.walkover-actions .btn.walkover:first-child{background:#16803b}.walkover-actions .btn.walkover:nth-child(2){background:#b91c1c}.status-Walkover{background:#f3f4f6;color:#374151;border-color:#9ca3af;font-weight:800}.status-select.status-Walkover{background:#f3f4f6;color:#374151}
