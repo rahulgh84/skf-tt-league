@@ -99,15 +99,27 @@
     <section id="scores" class="page">
       <div class="card can-score-only"><h2>Enter / Update Score</h2>
         <label><b>Select Match</b></label>
-        <div class="match-combo">
-          <input id="matchSearch" class="full-input" placeholder="Tap and search by player, match #, stadium, group..." onfocus="openMatchPicker()" oninput="filterScoreMatches()">
-          <div id="matchPickerList" class="match-picker-list hide"></div>
-        </div>
+        <button type="button" id="matchSelectTrigger" class="match-select-trigger" onclick="openMatchPicker(true)">
+          <span id="selectedMatchDisplay">Tap to search and select a match</span>
+          <b>⌄</b>
+        </button>
         <select id="matchSelect" class="hide" onchange="selectScoreMatch(this.value)"></select>
         <div id="scoreForm"></div>
       </div>
       <div class="card viewer-note"><h2>Scores</h2><p>Only manager or scorer can enter results. Viewers can see completed scores in Schedule and Standings.</p></div>
     </section>
+
+    <div id="matchPickerModal" class="match-picker-modal hide">
+      <div class="match-picker-panel">
+        <div class="match-picker-head">
+          <h2>Select Match</h2>
+          <button type="button" class="btn light" onclick="closeMatchPicker()">Close</button>
+        </div>
+        <input id="matchPickerSearch" class="full-input match-picker-search" placeholder="Search by player, match #, stadium, group..." oninput="filterScoreMatches()">
+        <p class="muted small-help">Type player name, match number, stadium, group, or status.</p>
+        <div id="matchPickerList" class="match-picker-list"></div>
+      </div>
+    </div>
 
     <section id="standings" class="page">
       <div class="card"><h2>Group Standings</h2><div id="groupStandings"></div></div>
