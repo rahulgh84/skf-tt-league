@@ -50,9 +50,11 @@
         <div class="card status-card live"><h3>🔴 Live</h3><b id="dashLive">0</b></div>
         <div class="card status-card completed"><h3>🟢 Completed</h3><b id="dashDone">0</b></div>
       </div>
+      <div class="card"><h2>🔴 Live Matches</h2><div id="dashLiveMatches"></div></div>
+      <div class="card"><h2>🟢 Completed Matches</h2><div id="dashCompletedMatches"></div></div>
       <div class="grid2">
         <div class="card"><h2>Top Standings</h2><div id="dashLeaderboard"></div></div>
-        <div class="card"><h2>Upcoming Schedule</h2><div id="dashUpcoming"></div></div>
+        <div class="card"><h2>🟡 Upcoming Schedule</h2><div id="dashUpcoming"></div></div>
       </div>
     </section>
 
@@ -96,10 +98,12 @@
 
     <section id="scores" class="page">
       <div class="card can-score-only"><h2>Enter / Update Score</h2>
-        <label><b>Search Match</b></label>
-        <input id="matchSearch" class="full-input" placeholder="Search by player, match #, stadium, group..." oninput="filterScoreMatches()">
         <label><b>Select Match</b></label>
-        <select id="matchSelect" onchange="selectScoreMatch(this.value)"></select>
+        <div class="match-combo">
+          <input id="matchSearch" class="full-input" placeholder="Tap and search by player, match #, stadium, group..." onfocus="openMatchPicker()" oninput="filterScoreMatches()">
+          <div id="matchPickerList" class="match-picker-list hide"></div>
+        </div>
+        <select id="matchSelect" class="hide" onchange="selectScoreMatch(this.value)"></select>
         <div id="scoreForm"></div>
       </div>
       <div class="card viewer-note"><h2>Scores</h2><p>Only manager or scorer can enter results. Viewers can see completed scores in Schedule and Standings.</p></div>
