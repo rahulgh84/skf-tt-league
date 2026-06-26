@@ -249,6 +249,14 @@ function matchStatus(m){
   const s = m?.status || 'Scheduled';
   return s === 'In Progress' ? 'Live' : s;
 }
+function hasScoreStarted(m){
+  if(!m) return false;
+  if((m.score||'').trim() && !/^pending$/i.test((m.score||'').trim()) && !/^w\/?o$/i.test((m.score||'').trim())) return true;
+  if(Array.isArray(m.sets) && m.sets.some(s => (Number(s.a)||0) > 0 || (Number(s.b)||0) > 0)) return true;
+  return false;
+}
+function isPublicLive(m){ return matchStatus(m)==='Live' && !m.winnerId && hasScoreStarted(m); }
+function isPublicCompleted(m){ return ['Completed','Walkover'].includes(matchStatus(m)) || !!m.winnerId; }
 function statusClass(m){ return 'status-' + matchStatus(m).replace(/\s+/g,'-'); }
 function statusBadge(m){
   const s = matchStatus(m);
@@ -279,28 +287,53 @@ function filteredScoreMatches(){
     groupName(m.groupId), stadiumName(m.stadiumId), matchStatus(m)
   ].join(' ').toLowerCase().includes(q));
 }
+window.openMatchPicker = () => {
+  const list = $('matchPickerList');
+  if(list) list.classList.remove('hide');
+  renderScoreMatchSelect();
+};
 window.filterScoreMatches = () => {
   scoreMatchSearch = $('matchSearch')?.value || '';
   renderScoreMatchSelect();
 };
-window.selectScoreMatch = (id) => {
+window.pickScoreMatch = (id) => {
   selectedScoreMatchId = id || '';
   if(selectedScoreMatchId) localStorage.setItem('skf_tt_selected_match', selectedScoreMatchId);
+  const m = activeMatches().find(x=>x.id===selectedScoreMatchId);
+  if($('matchSearch') && m) $('matchSearch').value = scoreMatchLabel(m);
+  const list = $('matchPickerList');
+  if(list) list.classList.add('hide');
   loadScoreForm();
 };
+window.selectScoreMatch = (id) => window.pickScoreMatch(id);
 function renderScoreMatchSelect(){
   const select = $('matchSelect');
-  if(!select) return;
+  const picker = $('matchPickerList');
   const matches = filteredScoreMatches();
-  select.innerHTML = matches.map(m=>`<option value="${m.id}">${scoreMatchLabel(m)}</option>`).join('');
-  const stillVisible = matches.some(m=>m.id===selectedScoreMatchId);
-  if(!selectedScoreMatchId || !stillVisible){
-    selectedScoreMatchId = matches[0]?.id || '';
+  if(select){
+    select.innerHTML = matches.map(m=>`<option value="${m.id}">${scoreMatchLabel(m)}</option>`).join('');
+  }
+  const stillExists = activeMatches().some(m=>m.id===selectedScoreMatchId);
+  if(!selectedScoreMatchId || !stillExists){
+    selectedScoreMatchId = matches[0]?.id || activeMatches()[0]?.id || '';
     if(selectedScoreMatchId) localStorage.setItem('skf_tt_selected_match', selectedScoreMatchId);
   }
-  if(selectedScoreMatchId) select.value = selectedScoreMatchId;
-  if(!matches.length) $('scoreForm').innerHTML = '<p class="muted">No matches found.</p>';
+  if(select && selectedScoreMatchId) select.value = selectedScoreMatchId;
+  if(picker){
+    picker.innerHTML = matches.length ? matches.slice(0,80).map(m=>`
+      <button type="button" class="match-picker-item ${m.id===selectedScoreMatchId?'selected':''}" onclick="pickScoreMatch('${m.id}')">
+        <span>${scoreMatchLabel(m)}</span>
+        <small>${m.date||'No date'} ${m.time||''} • ${groupName(m.groupId)} • ${statusBadge(m)}</small>
+      </button>`).join('') : '<p class="muted match-picker-empty">No matches found.</p>';
+  }
+  const selected = activeMatches().find(m=>m.id===selectedScoreMatchId);
+  if($('matchSearch') && selected && !scoreMatchSearch) $('matchSearch').value = scoreMatchLabel(selected);
+  if(!matches.length && $('scoreForm')) $('scoreForm').innerHTML = '<p class="muted">No matches found.</p>';
 }
+document.addEventListener('click', (e)=>{
+  const combo = document.querySelector('.match-combo');
+  if(combo && !combo.contains(e.target)) $('matchPickerList')?.classList.add('hide');
+});
 window.loadScoreForm = ()=>{
   const id = selectedScoreMatchId || $('matchSelect')?.value;
   const m=activeMatches().find(x=>x.id===id);
@@ -465,8 +498,8 @@ function render(){
   $('appTitle').textContent=state.settings.title;
   const matches = activeMatches();
   const scheduledCount = matches.filter(m=>matchStatus(m)==='Scheduled').length;
-  const liveCount = matches.filter(m=>matchStatus(m)==='Live').length;
-  const completedCount = matches.filter(m=>matchStatus(m)==='Completed').length;
+  const liveCount = matches.filter(m=>isPublicLive(m)).length;
+  const completedCount = matches.filter(m=>isPublicCompleted(m)).length;
   $('dashSeason').textContent=seasonName(activeSeasonId()); $('dashPlayers').textContent=activePlayers().length; $('dashGroups').textContent=activeGroups().length; $('dashMatches').textContent=matches.length; $('dashScheduled').textContent=scheduledCount; $('dashLive').textContent=liveCount; $('dashDone').textContent=completedCount;
   $('seasonsList').innerHTML=table(state.seasons,[['Season','name'],['Status','status'],['Action',r=>isManager?`<button class="btn" onclick="setActiveSeason('${r.id}')">Make Active</button><button class="btn light" onclick="archiveSeason('${r.id}')">Archive/Activate</button><button class="btn danger" onclick="deleteSeason('${r.id}')">Delete</button>`:'']]);
   const groupOptions=['<option value="">Unassigned</option>'+activeGroups().map(g=>`<option value="${g.id}">${g.name}</option>`).join('')];
@@ -478,9 +511,15 @@ function render(){
   $('manualStadium').innerHTML='<option value="">No stadium</option>'+state.stadiums.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
   const scheduleRows=activeMatches().filter(m=>!m.isKnockout);
   $('scheduleList').innerHTML=table(scheduleRows,[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Type','type'],['Group',r=>groupName(r.groupId)],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)],['Score',r=>matchScoreText(r)],['Status',r=>isManager?`<select class="status-select ${statusClass(r)}" onchange="changeStatus('${r.id}',this.value)">${['Scheduled','Live','Completed','Walkover','Postponed','Cancelled'].map(s=>`<option ${matchStatus(r)===s?'selected':''}>${s}</option>`).join('')}</select>`:statusBadge(r)],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
-  if($('matchSearch')) $('matchSearch').value = scoreMatchSearch;
-  renderScoreMatchSelect(); if(filteredScoreMatches().length) loadScoreForm(); else if($('scoreForm')) $('scoreForm').innerHTML='<p class="muted">No matches found.</p>';
-  $('dashUpcoming').innerHTML=table(activeMatches().filter(m=>matchStatus(m)==='Scheduled' || matchStatus(m)==='Live').slice(0,10),[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)]]);
+  renderScoreMatchSelect(); if(activeMatches().length) loadScoreForm(); else if($('scoreForm')) $('scoreForm').innerHTML='<p class="muted">No matches found.</p>';
+  const liveMatches = activeMatches().filter(m=>isPublicLive(m)).slice(0,6);
+  if($('dashLiveMatches')) $('dashLiveMatches').innerHTML = liveMatches.length ? liveMatches.map(m=>{
+    normalizeLiveMatch(m); const idx=currentSetIndex(m); const cur=m.sets[idx]||{a:0,b:0}; const r=matchResultFromSets(m);
+    return `<div class="public-match-card live"><div><b>${m.a} vs ${m.b}</b><p class="muted">${m.type} • ${stadiumName(m.stadiumId)} • Match #${m.matchNumber||m.serial||'-'}</p>${statusBadge(m)}</div><div class="public-score"><span>${cur.a||0}</span><b>-</b><span>${cur.b||0}</span><small>Sets ${r.aw}-${r.bw}</small></div></div>`;
+  }).join('') : '<p class="muted">No live matches right now.</p>';
+  const completedMatches = activeMatches().filter(m=>isPublicCompleted(m)).slice(-8).reverse();
+  if($('dashCompletedMatches')) $('dashCompletedMatches').innerHTML = completedMatches.length ? table(completedMatches, [['Match #',r=>r.matchNumber||r.serial||'-'], ['Match',r=>`${r.a} vs ${r.b}`], ['Score',r=>matchScoreText(r)], ['Winner',r=>r.winnerId?(r.winnerId===r.aId?r.a:r.b):'-'], ['Status',r=>statusBadge(r)]]) : '<p class="muted">No completed matches yet.</p>';
+  $('dashUpcoming').innerHTML=table(activeMatches().filter(m=>matchStatus(m)==='Scheduled').slice(0,10),[['Date',r=>`${r.date||'-'} ${r.time||''}`],['Match',r=>`${r.a} vs ${r.b}`],['Stadium',r=>stadiumName(r.stadiumId)], ['Status',r=>statusBadge(r)]]);
   $('dashLeaderboard').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows.slice(0,4),[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['W','w'],['L','l'],['Pts','pts'],['Diff',r=>r.pf-r.pa]])).join('');
   $('groupStandings').innerHTML=allGroupStandings().map(g=>`<h3>${g.group.name}</h3>`+table(g.rows,[['Rank',r=>g.rows.indexOf(r)+1],['Player','name'],['P','p'],['W','w'],['L','l'],['Pts','pts'],['PF','pf'],['PA','pa'],['Diff',r=>r.pf-r.pa]])).join('');
   $('knockoutList').innerHTML=table(activeMatches().filter(m=>m.isKnockout),[['Round','round'],['Match',r=>`${r.a} vs ${r.b}`],['Score',r=>matchScoreText(r)],['Winner',r=>r.winnerId?(r.winnerId===r.aId?r.a:r.b):'-'],['Action',r=>isManager?`<button class="btn danger" onclick="deleteMatch('${r.id}')">Delete</button>`:'']]);
