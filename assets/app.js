@@ -25,6 +25,9 @@ let pendingLocalChanges = localStorage.getItem('skf_tt_league_pending_sync') ===
 let role = localStorage.getItem('skf_tt_league_role') || 'viewer';
 let isManager = false;
 let isScorer = false;
+// Score page state: preserve selected match and search filter across renders.
+let selectedScoreMatchId = localStorage.getItem('skf_tt_selected_match') || '';
+let scoreMatchSearch = '';
 
 const $ = id => document.getElementById(id);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
