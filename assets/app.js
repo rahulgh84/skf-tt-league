@@ -1,5 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
 import { getFirestore, doc, onSnapshot, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
+import { getAnalytics, logEvent, isSupported } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-analytics.js';
 
 const fallbackKey = 'skf_tt_league_platform_fallback_v3';
 const defaultState = {
@@ -19,6 +20,7 @@ const defaultState = {
 };
 let state = structuredClone(defaultState);
 let docRef = null;
+let analytics = null;
 let isOnlineMode = navigator.onLine;
 let lastSyncStatus = 'Not synced';
 let pendingLocalChanges = localStorage.getItem('skf_tt_league_pending_sync') === 'yes';
@@ -33,6 +35,16 @@ const $ = id => document.getElementById(id);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 const getConfig = () => window.firebaseConfig || window.SKF_FIREBASE_CONFIG || {};
 const hasFirebaseConfig = () => { const c=getConfig(); return !!(c.apiKey && c.projectId); };
+function track(eventName, params = {}){
+  try{
+    if(!analytics) return;
+    logEvent(analytics, eventName, {
+      season: seasonName(activeSeasonId()),
+      role,
+      ...params
+    });
+  }catch(e){ console.warn('Analytics event skipped', eventName, e); }
+}
 const activeSeasonId = () => state.settings?.activeSeasonId || state.seasons[0]?.id || '';
 const seasonName = id => state.seasons.find(s=>s.id===id)?.name || 'No season';
 const activeGroups = () => state.groups.filter(g=>g.seasonId===activeSeasonId());
@@ -46,6 +58,12 @@ async function initData(){
   if(hasFirebaseConfig()){
     try{
       const app = initializeApp(getConfig());
+      try{
+        if((await isSupported()) && getConfig().measurementId){
+          analytics = getAnalytics(app);
+          track('app_open', { page: (location.hash || '#dashboard').slice(1) });
+        }
+      }catch(e){ console.warn('Analytics unavailable', e); }
       const db = getFirestore(app);
       docRef = doc(db, 'league', 'skf-tt-league');
       const snap = await getDoc(docRef);
@@ -134,13 +152,13 @@ function setRole(){
 window.closeLogin = () => $('loginModal').classList.add('hide');
 window.loginUser = () => {
   const password = $('passwordInput').value;
-  if(password === state.settings.managerPassword){ role='manager'; localStorage.setItem('skf_tt_league_role','manager'); closeLogin(); render(); }
-  else if(password === state.settings.scorerPassword){ role='scorer'; localStorage.setItem('skf_tt_league_role','scorer'); closeLogin(); render(); }
-  else alert('Wrong password');
+  if(password === state.settings.managerPassword){ role='manager'; localStorage.setItem('skf_tt_league_role','manager'); track('login_success', { login_role: 'manager' }); closeLogin(); render(); }
+  else if(password === state.settings.scorerPassword){ role='scorer'; localStorage.setItem('skf_tt_league_role','scorer'); track('login_success', { login_role: 'scorer' }); closeLogin(); render(); }
+  else { track('login_failed'); alert('Wrong password'); }
 };
 $('loginBtn').onclick = () => $('loginModal').classList.remove('hide');
 $('logoutBtn').onclick = () => { localStorage.removeItem('skf_tt_league_role'); role='viewer'; location.hash='dashboard'; render(); };
-function showPage(){ let id=(location.hash||'#dashboard').slice(1); if(id==='settings'&&!isManager) id='dashboard'; document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); ($(id)||$('dashboard')).classList.add('active'); render(); }
+function showPage(){ let id=(location.hash||'#dashboard').slice(1); if(id==='settings'&&!isManager) id='dashboard'; document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); ($(id)||$('dashboard')).classList.add('active'); track('page_view', { page: id }); render(); }
 window.addEventListener('hashchange', showPage);
 
 window.addSeason = async()=>{ if(!requireManager())return; const name=$('seasonName').value.trim(); if(!name)return; const id=uid(); state.seasons.push({id,name,status:'Active'}); state.settings.activeSeasonId=id; $('seasonName').value=''; await save(); render(); };
@@ -148,14 +166,14 @@ window.setActiveSeason = async id=>{ if(!requireManager())return; state.settings
 window.archiveSeason = async id=>{ if(!requireManager())return; const s=state.seasons.find(x=>x.id===id); if(s){ s.status = s.status==='Archived'?'Active':'Archived'; await save(); render(); } };
 window.deleteSeason = async id=>{ if(!requireManager())return; if(!confirm('Delete season and related groups/matches/players?'))return; state.seasons=state.seasons.filter(s=>s.id!==id); state.players=state.players.filter(p=>p.seasonId!==id); state.groups=state.groups.filter(g=>g.seasonId!==id); state.matches=state.matches.filter(m=>m.seasonId!==id); state.settings.activeSeasonId=state.seasons[0]?.id||''; await save(); render(); };
 
-window.addPlayer = async()=>{ if(!requireManager())return; const name=$('playerName').value.trim(); const nick=$('playerNick').value.trim(); if(!name)return; state.players.push({id:uid(), name, nick, seasonId:activeSeasonId(), groupId:''}); $('playerName').value=''; $('playerNick').value=''; await save(); render(); };
+window.addPlayer = async()=>{ if(!requireManager())return; const name=$('playerName').value.trim(); const nick=$('playerNick').value.trim(); if(!name)return; state.players.push({id:uid(), name, nick, seasonId:activeSeasonId(), groupId:''}); $('playerName').value=''; $('playerNick').value=''; await save(); track('player_added'); render(); };
 window.deletePlayer = async id=>{ if(!requireManager())return; if(!confirm('Delete player and related matches?'))return; state.players=state.players.filter(p=>p.id!==id); state.matches=state.matches.filter(m=>m.aId!==id&&m.bId!==id); await save(); render(); };
 window.changePlayerGroup = async(id, groupId)=>{ if(!requireManager())return; const p=state.players.find(x=>x.id===id); if(p){ p.groupId=groupId; await save(); render(); } };
 
-window.addGroup = async()=>{ if(!requireManager())return; const name=$('groupName').value.trim(); if(!name)return; state.groups.push({id:uid(), name, seasonId:activeSeasonId()}); $('groupName').value=''; await save(); render(); };
+window.addGroup = async()=>{ if(!requireManager())return; const name=$('groupName').value.trim(); if(!name)return; state.groups.push({id:uid(), name, seasonId:activeSeasonId()}); $('groupName').value=''; await save(); track('group_added'); render(); };
 window.deleteGroup = async id=>{ if(!requireManager())return; if(!confirm('Delete group? Players become unassigned and group matches are removed.'))return; state.groups=state.groups.filter(g=>g.id!==id); state.players.forEach(p=>{ if(p.groupId===id)p.groupId=''; }); state.matches=state.matches.filter(m=>m.groupId!==id); await save(); render(); };
 
-window.addStadium = async()=>{ if(!requireManager())return; const name=$('stadiumName').value.trim(); const host=$('stadiumHost').value.trim(); if(!name)return; state.stadiums.push({id:uid(), name, host}); $('stadiumName').value=''; $('stadiumHost').value=''; await save(); render(); };
+window.addStadium = async()=>{ if(!requireManager())return; const name=$('stadiumName').value.trim(); const host=$('stadiumHost').value.trim(); if(!name)return; state.stadiums.push({id:uid(), name, host}); $('stadiumName').value=''; $('stadiumHost').value=''; await save(); track('stadium_added'); render(); };
 window.deleteStadium = async id=>{ if(!requireManager())return; if(!confirm('Delete stadium?'))return; state.stadiums=state.stadiums.filter(s=>s.id!==id); state.matches.forEach(m=>{ if(m.stadiumId===id)m.stadiumId=''; }); await save(); render(); };
 
 window.generateGroupMatches = async()=>{
@@ -168,7 +186,7 @@ window.generateGroupMatches = async()=>{
       if(!exists) state.matches.push({id:uid(), seasonId:activeSeasonId(), type:'Group Match', status:'Scheduled', round:g.name, groupId:g.id, stadiumId:'', date:'', time:'', aId:list[i].id, bId:list[j].id, a:list[i].name, b:list[j].name, score:'', winnerId:null});
     }
   }
-  await save(); render();
+  await save(); track('group_matches_generated', { match_count: activeMatches().filter(m=>m.type==='Group Match').length }); render();
 };
 window.clearGroupMatches = async()=>{ if(!requireManager())return; if(confirm('Clear all group matches for active season?')){ state.matches=state.matches.filter(m=>!(m.seasonId===activeSeasonId()&&m.type==='Group Match')); await save(); render(); } };
 window.addManualMatch = async()=>{
@@ -176,7 +194,7 @@ window.addManualMatch = async()=>{
   const aId=$('manualA').value, bId=$('manualB').value;
   if(!aId||!bId||aId===bId)return alert('Select two different players.');
   state.matches.push({id:uid(), seasonId:activeSeasonId(), type:$('manualType').value, status:'Scheduled', round:$('manualRound').value.trim() || $('manualType').value, groupId:$('manualGroup').value, stadiumId:$('manualStadium').value, date:$('manualDate').value, time:$('manualTime').value, aId, bId, a:playerName(aId), b:playerName(bId), score:'', winnerId:null});
-  await save(); render();
+  await save(); track('manual_match_added', { match_type: $('manualType').value }); render();
 };
 window.deleteMatch = async id=>{ if(!requireManager())return; if(confirm('Delete match?')){ state.matches=state.matches.filter(m=>m.id!==id); await save(); render(); } };
 window.changeStatus = async(id,status)=>{ if(!requireManager())return; const m=state.matches.find(x=>x.id===id); if(m){ m.status=status; await save(); render(); } };
@@ -394,7 +412,7 @@ window.addPoint = async(id, side)=>{
   if(setWinner(s,m.pointsToWin,m.winBy)) s.done=true;
   refreshMatchFromLive(m);
   if(!m.winnerId && s.done) m.sets.push({a:0,b:0,done:false});
-  await save(); render(); loadScoreForm();
+  await save(); track('score_point_added', { match_id: id, side, match_number: m.matchNumber || '' }); render(); loadScoreForm();
 };
 window.undoPoint = async id=>{
   if(!requireScorer())return;
@@ -417,7 +435,7 @@ window.resetLiveScore = async id=>{
   if(!confirm('Reset score for this match?'))return;
   const m=state.matches.find(x=>x.id===id); if(!m)return;
   m.sets=[{a:0,b:0,done:false}]; m.pointHistory=[]; m.score=''; m.winnerId=null; m.status='Scheduled';
-  await save(); render(); loadScoreForm();
+  await save(); track('match_score_reset', { match_id: id }); render(); loadScoreForm();
 };
 
 window.declareWalkover = async (id, side)=>{
@@ -431,7 +449,7 @@ window.declareWalkover = async (id, side)=>{
   m.winnerId = side==='A' ? m.aId : m.bId;
   m.status='Walkover';
   m.completedAt=new Date().toISOString();
-  await save(); render(); loadScoreForm();
+  await save(); track('walkover_declared', { match_id: id, winner_side: side, match_number: m.matchNumber || '' }); render(); loadScoreForm();
 };
 
 window.saveScore = async id=>{
@@ -527,10 +545,10 @@ function render(){
   $('activeSeasonSelect').innerHTML=state.seasons.map(s=>`<option value="${s.id}" ${s.id===activeSeasonId()?'selected':''}>${s.name}</option>`).join('');
   $('settingTitle').value=state.settings.title; $('managerPasswordSetting').value=state.settings.managerPassword; $('scorerPasswordSetting').value=state.settings.scorerPassword;
 }
-window.exportCSV=()=>{ let lines=[['Season','Group','Rank','Player','Played','Won','Lost','Pts','PF','PA','Diff']]; allGroupStandings().forEach(g=>g.rows.forEach((r,i)=>lines.push([seasonName(activeSeasonId()),g.group.name,i+1,r.name,r.p,r.w,r.l,r.pts,r.pf,r.pa,r.pf-r.pa]))); download('skf-tt-standings.csv',lines.map(r=>r.join(',')).join('\n')); };
-window.downloadBackup=()=>download('skf-tt-league-backup.json',JSON.stringify(state,null,2));
+window.exportCSV=()=>{ track('standings_exported'); let lines=[['Season','Group','Rank','Player','Played','Won','Lost','Pts','PF','PA','Diff']]; allGroupStandings().forEach(g=>g.rows.forEach((r,i)=>lines.push([seasonName(activeSeasonId()),g.group.name,i+1,r.name,r.p,r.w,r.l,r.pts,r.pf,r.pa,r.pf-r.pa]))); download('skf-tt-standings.csv',lines.map(r=>r.join(',')).join('\n')); };
+window.downloadBackup=()=>{ track('backup_downloaded'); download('skf-tt-league-backup.json',JSON.stringify(state,null,2)); };
 function download(name,text){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'text/plain'})); a.download=name; a.click(); }
-window.resetAll=async()=>{ if(!requireManager())return; if(confirm('Reset all league data?')){ state=structuredClone(defaultState); await save(); render(); } };
+window.resetAll=async()=>{ if(!requireManager())return; if(confirm('Reset all league data?')){ state=structuredClone(defaultState); await save(); track('league_reset'); render(); } };
 
 if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(console.error)); }
 initData(); showPage();
