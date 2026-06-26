@@ -91,36 +91,22 @@
         </div>
         <button class="btn" onclick="addManualMatch()">Add Manual Match</button>
       </div>
-      <div class="card"><h2>Schedule</h2>
-        <div class="toolbar filters">
-          <input id="scheduleSearch" placeholder="Search player / round / match #" oninput="render()">
-          <select id="scheduleFilterGroup" onchange="render()"></select>
-          <select id="scheduleFilterStadium" onchange="render()"></select>
-          <select id="scheduleFilterStatus" onchange="render()"></select>
-          <select id="scheduleFilterType" onchange="render()"></select>
-          <input id="scheduleFilterDate" type="date" onchange="render()">
-          <button class="btn light" onclick="clearScheduleFilters()">Clear Filters</button>
-          <button class="btn" onclick="exportScheduleCSV()">Export Schedule CSV</button>
-        </div>
-        <div id="scheduleList"></div>
-      </div>
+      <div class="card"><h2>Schedule</h2><div id="scheduleList"></div></div>
     </section>
 
     <section id="scores" class="page">
-      <div class="card can-score-only"><h2>Enter / Update Score</h2><select id="matchSelect" onchange="loadScoreForm()"></select><div id="scoreForm"></div></div>
+      <div class="card can-score-only"><h2>Enter / Update Score</h2>
+        <label><b>Search Match</b></label>
+        <input id="matchSearch" class="full-input" placeholder="Search by player, match #, stadium, group..." oninput="filterScoreMatches()">
+        <label><b>Select Match</b></label>
+        <select id="matchSelect" onchange="selectScoreMatch(this.value)"></select>
+        <div id="scoreForm"></div>
+      </div>
       <div class="card viewer-note"><h2>Scores</h2><p>Only manager or scorer can enter results. Viewers can see completed scores in Schedule and Standings.</p></div>
     </section>
 
     <section id="standings" class="page">
-      <div class="card"><h2>Group Standings</h2>
-        <div class="toolbar filters">
-          <input id="standingsSearch" placeholder="Search player" oninput="render()">
-          <select id="standingsFilterGroup" onchange="render()"></select>
-          <button class="btn light" onclick="clearStandingsFilters()">Clear Filters</button>
-          <button class="btn" onclick="exportStandingsCSV()">Export Standings CSV</button>
-        </div>
-        <div id="groupStandings"></div>
-      </div>
+      <div class="card"><h2>Group Standings</h2><div id="groupStandings"></div></div>
     </section>
 
     <section id="knockouts" class="page">
